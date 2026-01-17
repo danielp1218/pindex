@@ -4,10 +4,11 @@ import { Spotlight } from '../components/ui/Spotlight';
 
 interface DecisionScreenProps {
   eventTitle: string;
+  userSelection: 'yes' | 'no' | null;
   onViewNodes: () => void;
 }
 
-export default function DecisionScreen({ eventTitle, onViewNodes }: DecisionScreenProps) {
+export default function DecisionScreen({ eventTitle, userSelection, onViewNodes }: DecisionScreenProps) {
   const [accepted, setAccepted] = useState<boolean | null>(null);
   const [strategyOpen, setStrategyOpen] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<'hedge' | 'trading'>('trading');
@@ -289,6 +290,44 @@ export default function DecisionScreen({ eventTitle, onViewNodes }: DecisionScre
             </AnimatePresence>
           </div>
         </div>
+
+        {/* User Selection Display */}
+        {userSelection && (
+          <div style={{
+            background: userSelection === 'yes' 
+              ? 'rgba(16, 185, 129, 0.15)' 
+              : 'rgba(239, 68, 68, 0.15)',
+            borderRadius: '8px',
+            border: `1px solid ${userSelection === 'yes' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+            padding: '12px',
+            marginBottom: '12px',
+          }}>
+            <div style={{
+              fontSize: '10px',
+              color: '#64748b',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              marginBottom: '4px',
+              fontWeight: 600,
+            }}>User Selection</div>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              color: userSelection === 'yes' ? '#34d399' : '#f87171',
+              fontWeight: 600,
+              fontSize: '14px',
+            }}>
+              <div style={{
+                width: '8px',
+                height: '8px',
+                background: userSelection === 'yes' ? '#10b981' : '#ef4444',
+                borderRadius: '50%',
+              }} />
+              <span>User said {userSelection === 'yes' ? 'yes' : 'no'}</span>
+            </div>
+          </div>
+        )}
 
         {/* System Decision */}
         <div>

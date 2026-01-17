@@ -5,9 +5,10 @@ import 'tailwindcss';
 
 interface PolyIndexOverlayProps {
   eventSlug: string;
+  userSelection?: 'yes' | 'no' | null;
 }
 
-export default function PolyIndexOverlay({ eventSlug }: PolyIndexOverlayProps) {
+export default function PolyIndexOverlay({ eventSlug, userSelection }: PolyIndexOverlayProps) {
   const [accepted, setAccepted] = useState<boolean | null>(null);
   const [strategyOpen, setStrategyOpen] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<'hedge' | 'trading'>('trading');
@@ -173,6 +174,27 @@ export default function PolyIndexOverlay({ eventSlug }: PolyIndexOverlayProps) {
           </div>
 
           <div className="h-px bg-slate-700/30" />
+
+          {/* User Selection Display */}
+          {userSelection && (
+            <div className={`rounded-xl border p-4 ${
+              userSelection === 'yes'
+                ? 'bg-emerald-500/15 border-emerald-500/30'
+                : 'bg-red-500/15 border-red-500/30'
+            }`}>
+              <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-2">
+                User Selection
+              </div>
+              <div className={`flex items-center gap-2 ${
+                userSelection === 'yes' ? 'text-emerald-400' : 'text-red-400'
+              } font-semibold text-sm`}>
+                <div className={`w-2 h-2 rounded-full ${
+                  userSelection === 'yes' ? 'bg-emerald-500' : 'bg-red-500'
+                }`} />
+                <span>User said {userSelection === 'yes' ? 'yes' : 'no'}</span>
+              </div>
+            </div>
+          )}
 
           {/* 3. AI Recommendation */}
           <div className="flex flex-col gap-3">

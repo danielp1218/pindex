@@ -12,6 +12,7 @@ function App() {
   const [pageUrl, setPageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentScreen, setCurrentScreen] = useState<Screen>('decision');
+  const [userSelection, setUserSelection] = useState<'yes' | 'no' | null>(null);
   const [graphData, setGraphData] = useState<GraphData>({
     nodes: [{ id: 'root', label: 'Root' }],
     links: [],
@@ -19,6 +20,20 @@ function App() {
 
   useEffect(() => {
     const initialize = async () => {
+      // Get user selection from storage
+      try {
+        const stored = await browser.storage.local.get(['lastUserSelection', 'selectionTimestamp']);
+        if (stored.lastUserSelection && typeof stored.selectionTimestamp === 'number') {
+          // Only use if selection was made in the last 5 seconds (to avoid stale data)
+          const age = Date.now() - stored.selectionTimestamp;
+          if (age < 5000 && (stored.lastUserSelection === 'yes' || stored.lastUserSelection === 'no')) {
+            setUserSelection(stored.lastUserSelection);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading user selection:', error);
+      }
+
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (tab.id && tab.url) {
         console.log('Tab URL:', tab.url);
@@ -26,6 +41,15 @@ function App() {
         console.log('Is event page:', isEventPage);
         if (isEventPage) {
           setPageUrl(tab.url);
+          // Also try to get selection from content script
+          try {
+            const response = await browser.tabs.sendMessage(tab.id, { action: 'getPageInfo' });
+            if (response?.userSelection) {
+              setUserSelection(response.userSelection);
+            }
+          } catch (error) {
+            console.error('Error getting page info:', error);
+          }
         } else {
           setPageUrl(null);
           setLoading(false);
@@ -82,6 +106,7 @@ function App() {
     return (
       <DecisionScreen
         eventTitle={getEventTitle()}
+        userSelection={userSelection}
         onViewNodes={() => setCurrentScreen('visualize')}
       />
     );
