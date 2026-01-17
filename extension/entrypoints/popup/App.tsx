@@ -1,89 +1,206 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { ChevronDownIcon, ChevronUpIcon } from '@radix-ui/react-icons';
+import { Spotlight } from '../components/ui/Spotlight';
 import './App.css';
-import { GraphData } from '@/types/graph';
-import { getCurrentPageState, saveCurrentPageState } from '@/utils/eventStorage';
-import AddNodesScreen from './AddNodesScreen.tsx';
-import VisualizationScreen from './VisualizationScreen.tsx';
 
-type Screen = 'add' | 'visualize';
+export default function App() {
+  const [accepted, setAccepted] = useState<boolean | null>(null);
+  const [strategyOpen, setStrategyOpen] = useState(false);
+  const [selectedStrategy, setSelectedStrategy] = useState<'hedge' | 'trading'>('trading');
+  const [nodesExpanded, setNodesExpanded] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(false);
 
-function App() {
-  const [pageUrl, setPageUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [currentScreen, setCurrentScreen] = useState<Screen>('visualize');
-  const [graphData, setGraphData] = useState<GraphData>({
-    nodes: [{ id: 'root', label: 'Root' }],
-    links: [],
-  });
+  const strategyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const initialize = async () => {
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-      if (tab.id && tab.url) {
-        console.log('Tab URL:', tab.url);
-        // First check if tab URL is a polymarket event page
-        const isEventPage = tab.url.includes('polymarket.com/event/');
-        console.log('Is event page:', isEventPage);
-        if (isEventPage) {
-          setPageUrl(tab.url);
-        } else {
-          setPageUrl(null);
-          return;
-        }
-        try{
-          const savedState = await getCurrentPageState(tab.url);
-          if (savedState && savedState.graphData) {
-            setGraphData(savedState.graphData);
-          }
-        } catch (error) {
-          console.error('Error loading saved state:', error);
-        } 
+    function handleClickOutside(event: MouseEvent) {
+      if (strategyRef.current && !strategyRef.current.contains(event.target as Node)) {
+        setStrategyOpen(false);
       }
-      setLoading(false);
-    };
-
-    initialize();
-  }, []);
-
-  const saveGraphData = async (newGraphData: GraphData) => {
-    setGraphData(newGraphData);
-    if (pageUrl) {
-      await saveCurrentPageState(pageUrl, { graphData: newGraphData });
     }
-  };
 
-  if (loading) {
-    return (
-      <div style={{ padding: '20px', minWidth: '600px', minHeight: '500px' }}>
-        <p>Loading...</p>
-      </div>
-    );
-  }
-  console.log('Page URL:', pageUrl);
-  if (!pageUrl) {
-    return (
-      <div style={{ padding: '20px', minWidth: '600px', minHeight: '500px' }}>
-        <h2>Polyindex</h2>
-        <p>Inactive - Navigate to a Polymarket event page</p>
-      </div>
-    );
-  }
+    if (strategyOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [strategyOpen]);
 
   return (
-    <div style={{ padding: '20px', minWidth: '600px', minHeight: '500px' }}>
-      <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', alignItems: 'center' }}>
-        <h2 style={{ margin: 0, flex: 1 }}>Polyindex</h2>
-        <button onClick={() => setCurrentScreen('visualize')}>Visualize</button>
-        <button onClick={() => setCurrentScreen('add')}>Add Nodes</button>
-      </div>
+    <div className="w-[420px] min-h-screen bg-black/96 font-sans relative overflow-hidden antialiased bg-grid-white/[0.02]">
+      {/* Spotlight effect */}
+      <Spotlight />
       
-      {currentScreen === 'visualize' ? (
-        <VisualizationScreen graphData={graphData} />
-      ) : (
-        <AddNodesScreen graphData={graphData} onGraphUpdate={saveGraphData} />
-      )}
+      {/* Subtle background gradient */}
+      <div className="absolute inset-0 bg-linear-to-br from-[#0f172a] via-[#0a0f1a] to-[#0d1424]" />
+
+      <div className="w-full bg-[#131c2e]/95 backdrop-blur-xl border border-slate-700/50 shadow-xl overflow-hidden flex flex-col relative z-10">
+
+        {/* Header Section */}
+        <div className="p-5 border-b border-slate-700/30 bg-[#1a2438]/50">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-linear-to-br from-slate-600 to-slate-700 rounded-full flex items-center justify-center text-white text-xl border border-slate-500/30">
+              🇺🇸
+            </div>
+            <h2 className="text-slate-100 text-[16px] font-semibold leading-tight truncate tracking-tight">
+              Trump: US Election 2024
+            </h2>
+          </div>
+        </div>
+
+        {/* Content Section */}
+        <div className="p-5 flex flex-col gap-4 overflow-y-auto max-h-[500px]">
+
+          {/* 1. Strategy Selection */}
+          <div ref={strategyRef} className="flex flex-col gap-2">
+            <button
+              onClick={() => setStrategyOpen(!strategyOpen)}
+              className="w-full bg-[#1a2438] hover:bg-[#1e293b] text-slate-200 py-3 px-4 rounded-xl text-sm font-medium transition-all flex items-center justify-between border border-slate-700/50"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-md border border-blue-500/30 uppercase tracking-wide font-semibold">Agent</span>
+                <span className="capitalize text-[13px]">{selectedStrategy} Strategy</span>
+              </div>
+              {strategyOpen ? <ChevronUpIcon className="text-slate-400" /> : <ChevronDownIcon className="text-slate-400" />}
+            </button>
+
+            {strategyOpen && (
+              <div className="bg-[#1a2438] rounded-xl border border-slate-700/50 overflow-hidden shadow-lg">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedStrategy('hedge');
+                    setStrategyOpen(false);
+                  }}
+                  className={`w-full p-4 text-left transition-colors border-b border-slate-700/30 bg-[#1a2438] hover:bg-[#243044] ${selectedStrategy === 'hedge' ? 'bg-[#243044]' : ''}`}
+                >
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-xs font-semibold text-slate-200 uppercase tracking-wide">Hedge</span>
+                    <span className="text-[9px] text-orange-400 font-semibold uppercase border border-orange-400/30 px-1.5 py-0.5 rounded">Safety</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-tight">Minimize losses by betting against current position.</p>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedStrategy('trading');
+                    setStrategyOpen(false);
+                  }}
+                  className={`w-full p-4 text-left transition-colors bg-[#1a2438] hover:bg-[#243044] ${selectedStrategy === 'trading' ? 'bg-[#243044]' : ''}`}
+                >
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-xs font-semibold text-slate-200 uppercase tracking-wide">Trading</span>
+                    <span className="text-[9px] text-emerald-400 font-semibold uppercase border border-emerald-400/30 px-1.5 py-0.5 rounded">Alpha</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-tight">Capitalize on market inefficiencies to increase EV.</p>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 2. Chain Dependency */}
+          <div
+            onClick={() => setNodesExpanded(!nodesExpanded)}
+            className="bg-[#1a2438] rounded-xl border border-slate-700/50 p-4 cursor-pointer hover:bg-[#1e293b] transition-colors"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Chain Dependency</span>
+              <span className="text-[10px] text-blue-400 font-medium uppercase tracking-tight">
+                {nodesExpanded ? 'Hide' : 'Expand'}
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex-1 bg-[#0f172a] p-2.5 rounded-lg border border-slate-700/30 text-[11px]">
+                <span className="text-slate-500 block text-[9px] uppercase font-medium mb-0.5">Source</span>
+                <span className="text-slate-200 font-medium">Trump Win Election</span>
+              </div>
+              <div className="text-slate-600 font-medium">→</div>
+              <div className="flex-1 bg-[#0f172a] p-2.5 rounded-lg border border-slate-700/30 text-[11px]">
+                <span className="text-slate-500 block text-[9px] uppercase font-medium mb-0.5">Target</span>
+                <span className="text-slate-200 font-medium">Trump takes Florida</span>
+              </div>
+            </div>
+            {nodesExpanded && (
+              <div className="mt-3 pt-3 border-t border-slate-700/30">
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Florida's probability curve acts as a high-confidence lead indicator. Volume spikes here traditionally precede national sentiment shifts by 4-6 hours.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="h-px bg-slate-700/30" />
+
+          {/* 3. AI Recommendation */}
+          <div className="flex flex-col gap-3">
+            <div className="bg-[#1a2438] p-5 rounded-xl border border-slate-700/50 flex flex-col items-center gap-3">
+              <div className="flex flex-col items-center gap-1.5">
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">System Decision</span>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full" />
+                  <h3 className="text-slate-100 text-xl font-bold uppercase tracking-tight">ACCEPT</h3>
+                </div>
+              </div>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowReasoning(!showReasoning);
+                }}
+                className="bg-[#243044] hover:bg-[#2d3a52] px-4 py-1.5 rounded-lg border border-slate-600/50 text-[10px] text-slate-300 font-medium uppercase tracking-wide transition-colors"
+              >
+                {showReasoning ? 'Hide Logic' : 'View Reasoning'}
+              </button>
+            </div>
+
+            {showReasoning && (
+              <div className="bg-[#1a2438] p-4 rounded-xl border border-slate-700/50">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-1 h-3 bg-blue-500 rounded-full" />
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wide font-semibold">Analysis</span>
+                </div>
+                <p className="text-[12px] text-slate-400 leading-relaxed">
+                  "Institutional volume in Florida has reached critical mass. Probability drift suggests a 4.2% alpha opportunity. Optimal execution window is now."
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Accept / Reject Buttons */}
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={() => setAccepted(true)}
+              className={`flex-1 py-3.5 rounded-xl font-semibold text-sm uppercase tracking-wide transition-all border ${
+                accepted === true
+                ? 'bg-emerald-600 text-white border-emerald-500'
+                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+              }`}
+            >
+              Accept
+            </button>
+            <button
+              onClick={() => setAccepted(false)}
+              className={`flex-1 py-3.5 rounded-xl font-semibold text-sm uppercase tracking-wide transition-all border ${
+                accepted === false
+                ? 'bg-red-600 text-white border-red-500'
+                : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
+              }`}
+            >
+              Reject
+            </button>
+          </div>
+
+        </div>
+
+        {/* Footer */}
+        <div className="mt-auto bg-[#0f172a] py-3 px-5 flex justify-between items-center border-t border-slate-700/30">
+          <span className="text-[9px] text-slate-600 uppercase tracking-wider font-medium">
+            Secure Node Alpha
+          </span>
+          <img src={chrome?.runtime?.getURL('logo.jpg') || '/logo.jpg'} alt="PolyIndex Logo" className="h-5 w-auto opacity-80" />
+        </div>
+      </div>
     </div>
   );
 }
-
-export default App;
