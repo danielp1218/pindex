@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { addClient, removeClient } from '../core/sse';
-import { questionQueue } from '../core/queue';
+import { dependencyQueue } from '../core/queue';
 
 export const sseRouter = new Hono();
 
@@ -14,7 +14,7 @@ sseRouter.get('/', (c) => {
       data: JSON.stringify({
         type: 'connected',
         clientId,
-        questions: questionQueue.getAll(),
+        dependencies: dependencyQueue.getAll(),
       }),
     });
 

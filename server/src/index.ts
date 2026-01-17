@@ -3,11 +3,12 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { setupTracing } from './lib/phoenix';
-import { startAgent } from './services/agent';
+import { startRelatedBetsAgent } from './services/related-bets-agent';
 import { healthRouter } from './routes/health';
 import { sseRouter } from './routes/sse';
-import { questionsRouter } from './routes/questions';
+import { dependenciesRouter } from './routes/dependencies';
 import { polymarketRouter } from './routes/polymarket';
+import { relatedBetsRouter } from './routes/related-bets';
 
 // Setup tracing
 setupTracing();
@@ -25,23 +26,25 @@ app.get('/', (c) => {
     endpoints: {
       health: '/health',
       events: '/events (SSE)',
-      questions: '/api/questions',
+      dependencies: '/api/dependencies',
       polymarket: '/api/polymarket',
+      relatedBets: '/api/related-bets',
     },
   });
 });
 
 app.route('/health', healthRouter);
 app.route('/events', sseRouter);
-app.route('/api/questions', questionsRouter);
+app.route('/api/dependencies', dependenciesRouter);
 app.route('/api/polymarket', polymarketRouter);
+app.route('/api/related-bets', relatedBetsRouter);
 
 const port = Number(process.env.PORT) || 8000;
 
 console.log(`Server starting on port ${port}...`);
 
 // Start background agent loop
-startAgent();
+startRelatedBetsAgent();
 
 serve({
   fetch: app.fetch,
