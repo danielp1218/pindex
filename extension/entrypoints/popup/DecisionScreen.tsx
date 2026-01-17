@@ -5,10 +5,11 @@ import { Spotlight } from '../components/ui/Spotlight';
 interface DecisionScreenProps {
   eventTitle: string;
   userSelection: 'yes' | 'no' | null;
+  profileImage: string | null;
   onViewNodes: () => void;
 }
 
-export default function DecisionScreen({ eventTitle, userSelection, onViewNodes }: DecisionScreenProps) {
+export default function DecisionScreen({ eventTitle, userSelection, profileImage, onViewNodes }: DecisionScreenProps) {
   const [accepted, setAccepted] = useState<boolean | null>(null);
   const [strategyOpen, setStrategyOpen] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<'hedge' | 'trading'>('trading');
@@ -59,19 +60,64 @@ export default function DecisionScreen({ eventTitle, userSelection, onViewNodes 
         background: 'transparent',
         position: 'relative',
         zIndex: 10,
+        gap: '12px',
+        minWidth: 0, // Allow flex items to shrink
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '10px',
+          flex: 1,
+          minWidth: 0, // Allow title to shrink
+        }}>
           <div style={{
             width: '32px',
             height: '32px',
-            background: 'linear-gradient(135deg, #475569, #334155)',
+            background: profileImage ? 'transparent' : 'linear-gradient(135deg, #475569, #334155)',
             borderRadius: '50%',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             fontSize: '16px',
-          }}>🇺🇸</div>
-          <h1 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: '#f1f5f9' }}>
+            flexShrink: 0, // Prevent icon from shrinking
+            overflow: 'hidden',
+          }}>
+            {profileImage ? (
+              <img 
+                src={profileImage} 
+                alt="Event profile" 
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  borderRadius: '50%',
+                }}
+                onError={(e) => {
+                  // Fallback to flag if image fails to load
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = 'none';
+                  const parent = target.parentElement;
+                  if (parent) {
+                    parent.textContent = '🇺🇸';
+                    parent.style.background = 'linear-gradient(135deg, #475569, #334155)';
+                  }
+                }}
+              />
+            ) : (
+              '🇺🇸'
+            )}
+          </div>
+          <h1 style={{ 
+            margin: 0, 
+            fontSize: '15px', 
+            fontWeight: 600, 
+            color: '#f1f5f9',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            flex: 1,
+            minWidth: 0, // Allow text to truncate
+          }}>
             {eventTitle}
           </h1>
         </div>
@@ -88,6 +134,8 @@ export default function DecisionScreen({ eventTitle, userSelection, onViewNodes 
             alignItems: 'center',
             gap: '4px',
             fontWeight: 500,
+            flexShrink: 0, // Prevent button from shrinking
+            whiteSpace: 'nowrap',
           }}
         >
           <span>View Nodes</span>
@@ -135,14 +183,7 @@ export default function DecisionScreen({ eventTitle, userSelection, onViewNodes 
             onClick={() => setStrategyOpen(!strategyOpen)}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{
-                fontSize: '8px',
-                background: 'rgba(59, 130, 246, 0.2)',
-                color: '#60a5fa',
-                padding: '2px 6px',
-                borderRadius: '4px',
-                fontWeight: 600,
-              }}>AGENT</span>
+              
               <span style={{ textTransform: 'capitalize' }}>{selectedStrategy}</span>
             </div>
             <motion.span 
@@ -191,7 +232,6 @@ export default function DecisionScreen({ eventTitle, userSelection, onViewNodes 
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
                     <span style={{ fontWeight: 600, fontSize: '11px' }}>Hedge</span>
-                    <span style={{ fontSize: '8px', color: '#fb923c', border: '1px solid rgba(251, 146, 60, 0.3)', padding: '1px 4px', borderRadius: '3px' }}>SAFETY</span>
                   </div>
                   <div style={{ fontSize: '10px', color: '#94a3b8' }}>Minimize risk</div>
                 </button>
@@ -210,7 +250,6 @@ export default function DecisionScreen({ eventTitle, userSelection, onViewNodes 
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
                     <span style={{ fontWeight: 600, fontSize: '11px' }}>Trading</span>
-                    <span style={{ fontSize: '8px', color: '#34d399', border: '1px solid rgba(52, 211, 153, 0.3)', padding: '1px 4px', borderRadius: '3px' }}>ALPHA</span>
                   </div>
                   <div style={{ fontSize: '10px', color: '#94a3b8' }}>Maximize EV</div>
                 </button>

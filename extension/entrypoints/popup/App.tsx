@@ -13,6 +13,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [currentScreen, setCurrentScreen] = useState<Screen>('decision');
   const [userSelection, setUserSelection] = useState<'yes' | 'no' | null>(null);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
   const [marketImageUrl, setMarketImageUrl] = useState<string | null>(null);
   const [graphData, setGraphData] = useState<GraphData>({
     nodes: [{ id: 'root', label: 'Root' }],
@@ -49,15 +50,22 @@ function App() {
 
           let currentMarketImageUrl: string | null = null;
 
-          // Also try to get selection and market image from content script
+          // Also try to get selection and images from content script
           try {
             const response = await browser.tabs.sendMessage(tab.id, { action: 'getPageInfo' });
             if (response?.userSelection) {
               setUserSelection(response.userSelection);
             }
+            if (response?.profileImage) {
+              setProfileImage(response.profileImage);
+            }
             if (response?.marketImageUrl) {
               currentMarketImageUrl = response.marketImageUrl;
               setMarketImageUrl(response.marketImageUrl);
+            } else if (response?.profileImage) {
+              // Use profileImage as marketImageUrl if marketImageUrl not provided
+              currentMarketImageUrl = response.profileImage;
+              setMarketImageUrl(response.profileImage);
             }
           } catch (error) {
             console.error('Error getting page info:', error);
@@ -132,6 +140,7 @@ function App() {
       <DecisionScreen
         eventTitle={getEventTitle()}
         userSelection={userSelection}
+        profileImage={profileImage}
         onViewNodes={() => setCurrentScreen('visualize')}
       />
     );
