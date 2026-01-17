@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDownIcon, ChevronUpIcon } from '@radix-ui/react-icons';
 import 'tailwindcss';
 
@@ -15,6 +16,7 @@ export default function PolyIndexOverlay({ eventSlug }: PolyIndexOverlayProps) {
   const [isMinimized, setIsMinimized] = useState(false);
 
   const strategyRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   // Click outside handler for strategy dropdown
   useEffect(() => {
@@ -63,9 +65,11 @@ export default function PolyIndexOverlay({ eventSlug }: PolyIndexOverlayProps) {
         <div className="p-5 flex flex-col gap-4 overflow-y-auto" style={{ maxHeight: 'calc(90vh - 80px)' }}>
           {/* 1. Strategy Selection */}
           <div ref={strategyRef} className="flex flex-col gap-2">
-            <button
+            <motion.button
+              whileHover={{ backgroundColor: '#1e293b' }}
+              whileTap={{ scale: 0.99 }}
               onClick={() => setStrategyOpen(!strategyOpen)}
-              className="w-full bg-[#1a2438] hover:bg-[#1e293b] text-slate-200 py-3 px-4 rounded-xl text-sm font-medium transition-all flex items-center justify-between border border-slate-700/50"
+              className="w-full bg-[#1a2438] text-slate-200 py-3 px-4 rounded-xl text-sm font-medium transition-all flex items-center justify-between border border-slate-700/50"
             >
               <div className="flex items-center gap-3">
                 <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-md border border-blue-500/30 uppercase tracking-wide font-semibold">
@@ -73,49 +77,59 @@ export default function PolyIndexOverlay({ eventSlug }: PolyIndexOverlayProps) {
                 </span>
                 <span className="capitalize text-[13px]">{selectedStrategy} Strategy</span>
               </div>
-              {strategyOpen ? <ChevronUpIcon className="text-slate-400" /> : <ChevronDownIcon className="text-slate-400" />}
-            </button>
+              <motion.div animate={{ rotate: strategyOpen ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                <ChevronDownIcon className="text-slate-400" />
+              </motion.div>
+            </motion.button>
 
-            {strategyOpen && (
-              <div className="bg-[#1a2438] rounded-xl border border-slate-700/50 overflow-hidden shadow-lg">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedStrategy('hedge');
-                    setStrategyOpen(false);
-                  }}
-                  className={`w-full p-4 text-left transition-colors border-b border-slate-700/30 bg-[#1a2438] hover:bg-[#243044] ${
-                    selectedStrategy === 'hedge' ? 'bg-[#243044]' : ''
-                  }`}
+            <AnimatePresence>
+              {strategyOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="bg-[#1a2438] rounded-xl border border-slate-700/50 overflow-hidden shadow-lg mt-1"
                 >
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-xs font-semibold text-slate-200 uppercase tracking-wide">Hedge</span>
-                    <span className="text-[9px] text-orange-400 font-semibold uppercase border border-orange-400/30 px-1.5 py-0.5 rounded">
-                      Safety
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 leading-tight">Minimize losses by betting against current position.</p>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedStrategy('trading');
-                    setStrategyOpen(false);
-                  }}
-                  className={`w-full p-4 text-left transition-colors bg-[#1a2438] hover:bg-[#243044] ${
-                    selectedStrategy === 'trading' ? 'bg-[#243044]' : ''
-                  }`}
-                >
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-xs font-semibold text-slate-200 uppercase tracking-wide">Trading</span>
-                    <span className="text-[9px] text-emerald-400 font-semibold uppercase border border-emerald-400/30 px-1.5 py-0.5 rounded">
-                      Alpha
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 leading-tight">Capitalize on market inefficiencies to increase EV.</p>
-                </button>
-              </div>
-            )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedStrategy('hedge');
+                      setStrategyOpen(false);
+                    }}
+                    className={`w-full p-4 text-left transition-colors border-b border-slate-700/30 bg-[#1a2438] hover:bg-[#243044] ${
+                      selectedStrategy === 'hedge' ? 'bg-[#243044]' : ''
+                    }`}
+                  >
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs font-semibold text-slate-200 uppercase tracking-wide">Hedge</span>
+                      <span className="text-[9px] text-orange-400 font-semibold uppercase border border-orange-400/30 px-1.5 py-0.5 rounded">
+                        Safety
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-tight">Minimize losses by betting against current position.</p>
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedStrategy('trading');
+                      setStrategyOpen(false);
+                    }}
+                    className={`w-full p-4 text-left transition-colors bg-[#1a2438] hover:bg-[#243044] ${
+                      selectedStrategy === 'trading' ? 'bg-[#243044]' : ''
+                    }`}
+                  >
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs font-semibold text-slate-200 uppercase tracking-wide">Trading</span>
+                      <span className="text-[9px] text-emerald-400 font-semibold uppercase border border-emerald-400/30 px-1.5 py-0.5 rounded">
+                        Alpha
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-tight">Capitalize on market inefficiencies to increase EV.</p>
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* 2. Chain Dependency */}
@@ -140,14 +154,22 @@ export default function PolyIndexOverlay({ eventSlug }: PolyIndexOverlayProps) {
                 <span className="text-slate-200 font-medium truncate">{eventTitle}</span>
               </div>
             </div>
-            {nodesExpanded && (
-              <div className="mt-3 pt-3 border-t border-slate-700/30">
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Market correlation analysis shows this event has dependencies on related prediction markets. Volume spikes here
-                  traditionally precede sentiment shifts in correlated markets.
-                </p>
-              </div>
-            )}
+            <AnimatePresence>
+              {nodesExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="mt-3 pt-3 border-t border-slate-700/30 overflow-hidden"
+                >
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Market correlation analysis shows this event has dependencies on related prediction markets. Volume spikes here
+                    traditionally precede sentiment shifts in correlated markets.
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div className="h-px bg-slate-700/30" />
@@ -174,42 +196,54 @@ export default function PolyIndexOverlay({ eventSlug }: PolyIndexOverlayProps) {
               </button>
             </div>
 
-            {showReasoning && (
-              <div className="bg-[#1a2438] p-4 rounded-xl border border-slate-700/50">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-1 h-3 bg-blue-500 rounded-full" />
-                  <span className="text-[10px] text-slate-500 uppercase tracking-wide font-semibold">Analysis</span>
-                </div>
-                <p className="text-[12px] text-slate-400 leading-relaxed">
-                  "Market signals indicate a favorable risk/reward ratio. Current probability drift suggests a 4.2% alpha
-                  opportunity. Optimal execution window is now."
-                </p>
-              </div>
-            )}
+            <AnimatePresence>
+              {showReasoning && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="bg-[#1a2438] p-4 rounded-xl border border-slate-700/50 overflow-hidden"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-1 h-3 bg-blue-500 rounded-full" />
+                    <span className="text-[10px] text-slate-500 uppercase tracking-wide font-semibold">Analysis</span>
+                  </div>
+                  <p className="text-[12px] text-slate-400 leading-relaxed">
+                    "Market signals indicate a favorable risk/reward ratio. Current probability drift suggests a 4.2% alpha
+                    opportunity. Optimal execution window is now."
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Accept / Reject Buttons */}
           <div className="flex gap-3 pt-2">
-            <button
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               onClick={() => setAccepted(true)}
-              className={`flex-1 py-3.5 rounded-xl font-semibold text-sm uppercase tracking-wide transition-all border ${
+              className={`flex-1 py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all border backdrop-blur-md shadow-lg ${
                 accepted === true
-                  ? 'bg-emerald-600 text-white border-emerald-500'
-                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                  ? 'bg-gradient-to-b from-emerald-500 to-emerald-700 text-white border-emerald-400/50 shadow-emerald-500/20'
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
               }`}
             >
               Accept
-            </button>
-            <button
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               onClick={() => setAccepted(false)}
-              className={`flex-1 py-3.5 rounded-xl font-semibold text-sm uppercase tracking-wide transition-all border ${
+              className={`flex-1 py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all border backdrop-blur-md shadow-lg ${
                 accepted === false
-                  ? 'bg-red-600 text-white border-red-500'
-                  : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'
+                  ? 'bg-gradient-to-b from-red-500 to-red-700 text-white border-red-400/50 shadow-red-500/20'
+                  : 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'
               }`}
             >
               Reject
-            </button>
+            </motion.button>
           </div>
         </div>
       )}
