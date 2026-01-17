@@ -1,3 +1,7 @@
 export default defineBackground(() => {
-  console.log('Hello background!', { id: browser.runtime.id });
+  browser.runtime.onMessage.addListener(async (message, sender) => {
+    if (message.action === 'openPopup') {
+      await browser.action.openPopup();
+    }
+  });
 });
