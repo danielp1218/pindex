@@ -21,7 +21,7 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
     const svg = d3.select(svgRef.current)
       .attr('width', width)
       .attr('height', height)
-      .attr('style', 'border: 1px solid #ccc; background: #1e1e1e;');
+      .attr('style', 'border: 1px solid #334155; background: #1e1e1e; border-radius: 12px;');
 
     // Create a group for zoom/pan
     const g = svg.append('g');

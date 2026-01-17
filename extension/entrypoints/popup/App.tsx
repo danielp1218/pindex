@@ -86,7 +86,7 @@ function App() {
 
   if (loading) {
     return (
-      <div style={{ minWidth: '420px', minHeight: '500px', background: '#0a0f1a', color: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ minWidth: '420px', minHeight: '600px', background: '#0a0f1a', color: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         Loading...
       </div>
     );
@@ -94,7 +94,7 @@ function App() {
 
   if (!pageUrl) {
     return (
-      <div style={{ padding: '20px', minWidth: '420px', minHeight: '500px', background: '#0a0f1a', color: '#e2e8f0' }}>
+      <div style={{ padding: '20px', minWidth: '420px', minHeight: '600px', background: '#0a0f1a', color: '#e2e8f0' }}>
         <h2>Polyindex</h2>
         <p>Inactive - Navigate to a Polymarket event page</p>
       </div>

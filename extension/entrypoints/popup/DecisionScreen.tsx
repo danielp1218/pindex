@@ -169,7 +169,7 @@ export default function DecisionScreen({ eventTitle, userSelection, onViewNodes 
                   background: 'rgba(30, 41, 59, 0.8)',
                   backdropFilter: 'blur(12px)',
                   border: '1px solid rgba(51, 65, 85, 0.5)',
-                  borderRadius: '8px',
+                  borderRadius: '16px',
                   overflow: 'hidden',
                   zIndex: 10,
                   boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
