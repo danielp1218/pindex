@@ -3,9 +3,10 @@ import { GraphData, Node } from '@/types/graph';
 interface AddNodesScreenProps {
   graphData: GraphData;
   onGraphUpdate: (newGraphData: GraphData) => void;
+  marketImageUrl: string | null;
 }
 
-function AddNodesScreen({ graphData, onGraphUpdate }: AddNodesScreenProps) {
+function AddNodesScreen({ graphData, onGraphUpdate, marketImageUrl }: AddNodesScreenProps) {
   const generateRandomLabel = () => {
     const adjectives = ['Quick', 'Lazy', 'Happy', 'Sad', 'Brave', 'Smart', 'Wild', 'Calm', 'Bold', 'Swift'];
     const nouns = ['Fox', 'Dog', 'Cat', 'Bear', 'Wolf', 'Eagle', 'Tiger', 'Lion', 'Hawk', 'Owl'];
@@ -18,6 +19,7 @@ function AddNodesScreen({ graphData, onGraphUpdate }: AddNodesScreenProps) {
     const newNode: Node = {
       id: `node-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       label: generateRandomLabel(),
+      imageUrl: marketImageUrl || undefined,
     };
 
     // Pick a random existing node to link to

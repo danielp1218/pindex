@@ -88,16 +88,63 @@ export default defineContentScript({
       setTimeout(setupYesNoListeners, 500);
     });
 
+    // Function to extract market image URL from the page
+    const getMarketImageUrl = (): string | null => {
+      // Try to find the market image - typically a circular image near the title
+      // Look for img elements that are likely the market icon
+      const possibleSelectors = [
+        // Common patterns for market images on Polymarket
+        'img[alt*="market"]',
+        'img[alt*="event"]',
+        // Look for images near h1 titles
+        'h1 img',
+        'h1 ~ img',
+        'h1 + * img',
+        // Look for avatar/icon style images
+        '[class*="avatar"] img',
+        '[class*="icon"] img',
+        '[class*="market"] img',
+        // Generic approach - find the first meaningful image in the main content
+        'main img',
+        'article img',
+      ];
+
+      for (const selector of possibleSelectors) {
+        const img = document.querySelector(selector) as HTMLImageElement;
+        if (img && img.src && !img.src.includes('logo') && !img.src.includes('icon')) {
+          return img.src;
+        }
+      }
+
+      // Fallback: Find the first image that looks like a market image
+      // (circular, small, near the top of the content)
+      const allImages = document.querySelectorAll('img');
+      for (const img of allImages) {
+        const rect = img.getBoundingClientRect();
+        // Look for images that are roughly square and reasonably sized (market icons)
+        if (rect.width > 30 && rect.width < 200 &&
+            Math.abs(rect.width - rect.height) < 20 &&
+            img.src &&
+            !img.src.includes('logo') &&
+            !img.src.includes('polymarket.com/favicon')) {
+          return img.src;
+        }
+      }
+
+      return null;
+    };
+
     // Listen for requests from the popup
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.action === 'getPageInfo') {
         if (window.location.pathname.startsWith('/event/')) {
-          sendResponse({ 
+          sendResponse({
             url: window.location.href,
-            userSelection: userSelection 
+            userSelection: userSelection,
+            marketImageUrl: getMarketImageUrl()
           });
         } else {
-          sendResponse({ url: null, userSelection: null });
+          sendResponse({ url: null, userSelection: null, marketImageUrl: null });
         }
       }
       return true;

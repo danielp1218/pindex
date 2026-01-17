@@ -8,12 +8,13 @@ interface VisualizationScreenProps {
 
 function VisualizationScreen({ graphData }: VisualizationScreenProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!svgRef.current || graphData.nodes.length === 0) return;
 
     const width = 380;
-    const height = 350;
+    const height = 480;
 
     // Clear previous render
     d3.select(svgRef.current).selectAll('*').remove();
@@ -77,21 +78,69 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
         })
       );
 
-    // Add circles to nodes
-    node.append('circle')
+    // Add circular clip path definition
+    const defs = svg.append('defs');
+    defs.append('clipPath')
+      .attr('id', 'circleClip')
+      .append('circle')
       .attr('r', 20)
-      .attr('fill', '#69b3a2')
-      .attr('stroke', '#fff')
-      .attr('stroke-width', 2);
+      .attr('cx', 0)
+      .attr('cy', 0);
 
-    // Add labels to nodes
-    node.append('text')
-      .text(d => d.label)
-      .attr('text-anchor', 'middle')
-      .attr('dy', '0.35em')
-      .attr('fill', '#fff')
-      .attr('font-size', '10px')
-      .attr('pointer-events', 'none');
+    // Add market images or fallback circles to nodes
+    node.each(function(d: any) {
+      const nodeGroup = d3.select(this);
+      if (d.imageUrl) {
+        // Use the market image from the page
+        nodeGroup.append('image')
+          .attr('href', d.imageUrl)
+          .attr('width', 40)
+          .attr('height', 40)
+          .attr('x', -20)
+          .attr('y', -20)
+          .attr('clip-path', 'url(#circleClip)')
+          .attr('preserveAspectRatio', 'xMidYMid slice');
+      } else {
+        // Fallback to teal circle for nodes without images
+        nodeGroup.append('circle')
+          .attr('r', 20)
+          .attr('fill', '#69b3a2')
+          .attr('stroke', '#fff')
+          .attr('stroke-width', 2);
+      }
+    });
+
+    // Add labels only to nodes without images (fallback nodes)
+    node.each(function(d: any) {
+      if (!d.imageUrl) {
+        d3.select(this).append('text')
+          .text(d.label)
+          .attr('text-anchor', 'middle')
+          .attr('dy', '0.35em')
+          .attr('fill', '#fff')
+          .attr('font-size', '10px')
+          .attr('pointer-events', 'none');
+      }
+    });
+
+    // Add hover tooltip events
+    const tooltip = d3.select(tooltipRef.current);
+    node
+      .on('mouseenter', (event: MouseEvent, d: any) => {
+        tooltip
+          .style('opacity', '1')
+          .style('left', `${event.offsetX + 10}px`)
+          .style('top', `${event.offsetY - 10}px`)
+          .text(d.label);
+      })
+      .on('mousemove', (event: MouseEvent) => {
+        tooltip
+          .style('left', `${event.offsetX + 10}px`)
+          .style('top', `${event.offsetY - 10}px`);
+      })
+      .on('mouseleave', () => {
+        tooltip.style('opacity', '0');
+      });
 
     // Update positions on each tick
     simulation.on('tick', () => {
@@ -119,10 +168,28 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
   }
 
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
       <svg ref={svgRef}></svg>
-      <div style={{ marginTop: '10px', fontSize: '12px', color: '#999' }}>
-        <p>Drag nodes to move them. Scroll to zoom. Click and drag to pan.</p>
+      <div
+        ref={tooltipRef}
+        style={{
+          position: 'absolute',
+          background: '#1e293b',
+          color: '#e2e8f0',
+          padding: '8px 12px',
+          borderRadius: '6px',
+          fontSize: '12px',
+          pointerEvents: 'none',
+          opacity: 0,
+          transition: 'opacity 0.15s',
+          maxWidth: '200px',
+          wordWrap: 'break-word',
+          border: '1px solid #334155',
+          zIndex: 10,
+        }}
+      />
+      <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
+        <p style={{ margin: 0 }}>Drag nodes to move. Scroll to zoom.</p>
       </div>
     </div>
   );

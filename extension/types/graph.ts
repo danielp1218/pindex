@@ -1,6 +1,7 @@
 export interface Node {
   id: string;
   label: string;
+  imageUrl?: string;
   x?: number;
   y?: number;
   vx?: number;

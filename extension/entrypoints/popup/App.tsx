@@ -13,6 +13,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [currentScreen, setCurrentScreen] = useState<Screen>('decision');
   const [userSelection, setUserSelection] = useState<'yes' | 'no' | null>(null);
+  const [marketImageUrl, setMarketImageUrl] = useState<string | null>(null);
   const [graphData, setGraphData] = useState<GraphData>({
     nodes: [{ id: 'root', label: 'Root' }],
     links: [],
@@ -41,27 +42,51 @@ function App() {
         console.log('Is event page:', isEventPage);
         if (isEventPage) {
           setPageUrl(tab.url);
-          // Also try to get selection from content script
+
+          // Extract event title from URL for root node
+          const slug = tab.url.split('/event/')[1]?.split('?')[0] || '';
+          const eventTitle = slug.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Market';
+
+          let currentMarketImageUrl: string | null = null;
+
+          // Also try to get selection and market image from content script
           try {
             const response = await browser.tabs.sendMessage(tab.id, { action: 'getPageInfo' });
             if (response?.userSelection) {
               setUserSelection(response.userSelection);
             }
+            if (response?.marketImageUrl) {
+              currentMarketImageUrl = response.marketImageUrl;
+              setMarketImageUrl(response.marketImageUrl);
+            }
           } catch (error) {
             console.error('Error getting page info:', error);
+          }
+
+          // Try to load saved state, or create initial state with market info
+          try {
+            const savedState = await getCurrentPageState(tab.url);
+            if (savedState && savedState.graphData) {
+              setGraphData(savedState.graphData);
+            } else {
+              // No saved state - create initial graph with market title and image
+              setGraphData({
+                nodes: [{ id: 'root', label: eventTitle, imageUrl: currentMarketImageUrl || undefined }],
+                links: [],
+              });
+            }
+          } catch (error) {
+            console.error('Error loading saved state:', error);
+            // On error, still set up with market info
+            setGraphData({
+              nodes: [{ id: 'root', label: eventTitle, imageUrl: currentMarketImageUrl || undefined }],
+              links: [],
+            });
           }
         } else {
           setPageUrl(null);
           setLoading(false);
           return;
-        }
-        try {
-          const savedState = await getCurrentPageState(tab.url);
-          if (savedState && savedState.graphData) {
-            setGraphData(savedState.graphData);
-          }
-        } catch (error) {
-          console.error('Error loading saved state:', error);
         }
       }
       setLoading(false);
@@ -167,7 +192,7 @@ function App() {
       {currentScreen === 'visualize' ? (
         <VisualizationScreen graphData={graphData} />
       ) : (
-        <AddNodesScreen graphData={graphData} onGraphUpdate={saveGraphData} />
+        <AddNodesScreen graphData={graphData} onGraphUpdate={saveGraphData} marketImageUrl={marketImageUrl} />
       )}
     </div>
   );
