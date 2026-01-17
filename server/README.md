@@ -102,7 +102,6 @@ src/
 │   ├── questions.ts       # Question submission & retrieval
 │   └── polymarket.ts      # Polymarket proxy routes
 ├── services/              # Business logic
-│   ├── agent.ts           # Background processing loop
 │   └── proposal-generator.ts  # Market proposal generation
 ├── lib/                   # External integrations
 │   ├── openai.ts          # OpenAI client
