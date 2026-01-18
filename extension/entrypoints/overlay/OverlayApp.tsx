@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as d3 from 'd3';
-import { MascotLoader } from './MascotLoader';
+import { VideoLoader } from './VideoLoader';
+import { useRelatedBets, createMiniGraphData } from '@/hooks/useRelatedBets';
+import { getRelationshipColor, BetRelationship } from '@/types/graph';
 
 interface OverlayAppProps {
   isVisible: boolean;
@@ -17,11 +19,18 @@ interface GraphNode {
   imageUrl?: string;
   x?: number;
   y?: number;
+  marketId?: string;
+  slug?: string;
+  url?: string;
+  yesPercentage?: number;
+  noPercentage?: number;
 }
 
 interface GraphLink {
   source: string;
   target: string;
+  relationship?: BetRelationship;
+  reasoning?: string;
 }
 
 interface GraphData {
@@ -79,11 +88,22 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
   const overlayRef = useRef<HTMLDivElement>(null);
   const strategyRef = useRef<HTMLDivElement>(null);
 
-  // Mini-graph node data
-  const miniGraphNodes = [
-    { id: 'tw', label: 'TW', fullLabel: 'Trump Win Election', x: 70, y: 55 },
-    { id: 'tf', label: 'TF', fullLabel: 'Trump takes Florida', x: 270, y: 55 },
-  ];
+  // Get current page URL for API
+  const currentUrl = useMemo(() => {
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/event/')) {
+      return window.location.href;
+    }
+    return null;
+  }, [isVisible]);
+
+  // Fetch related bets from API (pass profileImage for source node)
+  const { graphData: apiGraphData, isLoading: isApiLoading, error: apiError, progress: apiProgress } = useRelatedBets(
+    isVisible ? currentUrl : null,
+    profileImage
+  );
+
+  // Create mini graph data from API response
+  const miniGraphData = useMemo(() => createMiniGraphData(apiGraphData), [apiGraphData]);
 
   // Update profile image when prop changes
   useEffect(() => {
@@ -143,7 +163,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
 
   // D3 Mini Graph Effect (for decision screen)
   useEffect(() => {
-    if (!isVisible || isLoading || currentScreen !== 'decision') return;
+    if (!isVisible || isLoading || currentScreen !== 'decision' || !miniGraphData) return;
 
     let simulation: d3.Simulation<any, undefined> | null = null;
 
@@ -171,21 +191,31 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
 
       svg.call(zoom);
 
-      const nodes = miniGraphNodes.map(d => ({ ...d }));
-      const links = [{ source: nodes[0], target: nodes[1] }];
+      const nodes = miniGraphData.nodes.map(d => ({ ...d }));
+      const links = miniGraphData.links.map(d => ({ ...d, source: nodes[0], target: nodes[1] }));
 
       const nodeRadius = 18;
       simulation = d3.forceSimulation(nodes)
         .force('link', d3.forceLink(links).distance(200))
         .alphaDecay(0.05);
 
+      // Draw link with relationship color
       const link = g.append('g')
         .selectAll('line')
         .data(links)
         .join('line')
-        .attr('stroke', '#334155')
-        .attr('stroke-opacity', 0.5)
-        .attr('stroke-width', 1);
+        .attr('stroke', (d: any) => getRelationshipColor(d.relationship))
+        .attr('stroke-opacity', 0.6)
+        .attr('stroke-width', 2);
+
+      // Add circular clip path for mini graph images
+      const defs = svg.append('defs');
+      defs.append('clipPath')
+        .attr('id', 'miniCircleClip')
+        .append('circle')
+        .attr('r', nodeRadius - 2)
+        .attr('cx', 0)
+        .attr('cy', 0);
 
       const node = g.append('g')
         .selectAll('g')
@@ -209,20 +239,38 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
           })
         );
 
-      node.append('circle')
-        .attr('r', nodeRadius)
-        .attr('fill', '#1e293b')
-        .attr('stroke', '#334155')
-        .attr('stroke-width', 1);
-
-      node.append('text')
-        .text((d: any) => d.label)
-        .attr('text-anchor', 'middle')
-        .attr('dy', '0.35em')
-        .attr('fill', '#64748b')
-        .attr('font-size', '11px')
-        .attr('font-weight', '500')
-        .attr('pointer-events', 'none');
+      // Render nodes with images if available, otherwise circle with text
+      node.each(function(d: any) {
+        const nodeGroup = d3.select(this);
+        
+        if (d.imageUrl) {
+          // Clipped image node
+          nodeGroup.append('image')
+            .attr('href', d.imageUrl)
+            .attr('width', (nodeRadius - 2) * 2)
+            .attr('height', (nodeRadius - 2) * 2)
+            .attr('x', -(nodeRadius - 2))
+            .attr('y', -(nodeRadius - 2))
+            .attr('clip-path', 'url(#miniCircleClip)')
+            .attr('preserveAspectRatio', 'xMidYMid slice');
+        } else {
+          // Fallback circle with text
+          nodeGroup.append('circle')
+            .attr('r', nodeRadius)
+            .attr('fill', '#1e293b')
+            .attr('stroke', '#334155')
+            .attr('stroke-width', 1);
+          
+          nodeGroup.append('text')
+            .text(d.label)
+            .attr('text-anchor', 'middle')
+            .attr('dy', '0.35em')
+            .attr('fill', '#64748b')
+            .attr('font-size', '11px')
+            .attr('font-weight', '500')
+            .attr('pointer-events', 'none');
+        }
+      });
 
       const tooltip = d3.select(tooltipRef.current);
       node
@@ -244,12 +292,16 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
 
       simulation.on('tick', () => {
         link
-          .attr('x1', (d: any) => d.source.x)
-          .attr('y1', (d: any) => d.source.y)
-          .attr('x2', (d: any) => d.target.x)
-          .attr('y2', (d: any) => d.target.y);
+          .attr('x1', (d: any) => d.source?.x ?? 0)
+          .attr('y1', (d: any) => d.source?.y ?? 0)
+          .attr('x2', (d: any) => d.target?.x ?? 0)
+          .attr('y2', (d: any) => d.target?.y ?? 0);
 
-        node.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
+        node.attr('transform', (d: any) => {
+          const x = d.x ?? 0;
+          const y = d.y ?? 0;
+          return `translate(${x},${y})`;
+        });
       });
     }, 350);
 
@@ -257,7 +309,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       clearTimeout(timeoutId);
       simulation?.stop();
     };
-  }, [isVisible, isLoading, currentScreen]);
+  }, [isVisible, isLoading, currentScreen, miniGraphData]);
 
   // D3 Full Visualization Graph (for visualize screen)
   useEffect(() => {
@@ -303,9 +355,20 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       .selectAll('line')
       .data(links)
       .join('line')
-      .attr('stroke', '#334155')
-      .attr('stroke-opacity', 0.5)
-      .attr('stroke-width', 1);
+      .attr('stroke', (d: any) => getRelationshipColor(d.relationship))
+      .attr('stroke-opacity', 0.6)
+      .attr('stroke-width', 2)
+      .style('cursor', 'pointer')
+      .on('mouseenter', (event: MouseEvent, d: any) => {
+        d3.select(event.target as Element)
+          .attr('stroke-opacity', 1)
+          .attr('stroke-width', 3);
+      })
+      .on('mouseleave', (event: MouseEvent) => {
+        d3.select(event.target as Element)
+          .attr('stroke-opacity', 0.6)
+          .attr('stroke-width', 2);
+      });
 
     const defs = svg.append('defs');
     defs.append('clipPath')
@@ -387,12 +450,16 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
 
     simulation.on('tick', () => {
       link
-        .attr('x1', (d: any) => d.source.x)
-        .attr('y1', (d: any) => d.source.y)
-        .attr('x2', (d: any) => d.target.x)
-        .attr('y2', (d: any) => d.target.y);
+        .attr('x1', (d: any) => d.source?.x ?? 0)
+        .attr('y1', (d: any) => d.source?.y ?? 0)
+        .attr('x2', (d: any) => d.target?.x ?? 0)
+        .attr('y2', (d: any) => d.target?.y ?? 0);
 
-      node.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
+      node.attr('transform', (d: any) => {
+        const x = d.x ?? 0;
+        const y = d.y ?? 0;
+        return `translate(${x},${y})`;
+      });
     });
 
     return () => {
@@ -423,16 +490,37 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     }
   }, [isVisible]);
 
-  // Fake loading time - show mascot for 2.5 seconds (remove this later)
+  // Loading state tied to API loading
   useEffect(() => {
     if (isVisible) {
-      setIsLoading(true);
-      const timer = setTimeout(() => {
-        setIsLoading(false);
-      }, 2500);
-      return () => clearTimeout(timer);
+      // Show loading when API is fetching or if we don't have data yet
+      setIsLoading(isApiLoading || (!apiGraphData && !apiError));
     }
-  }, [isVisible]);
+  }, [isVisible, isApiLoading, apiGraphData, apiError]);
+
+  // Update graphData when API data changes
+  useEffect(() => {
+    if (apiGraphData) {
+      setGraphData({
+        nodes: apiGraphData.nodes.map(n => ({
+          id: n.id,
+          label: n.label,
+          imageUrl: n.imageUrl,
+          marketId: n.marketId,
+          slug: n.slug,
+          url: n.url,
+          yesPercentage: n.yesPercentage,
+          noPercentage: n.noPercentage,
+        })),
+        links: apiGraphData.links.map(l => ({
+          source: typeof l.source === 'string' ? l.source : l.source.id,
+          target: typeof l.target === 'string' ? l.target : l.target.id,
+          relationship: l.relationship,
+          reasoning: l.reasoning,
+        })),
+      });
+    }
+  }, [apiGraphData]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -640,33 +728,98 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
             />
           </div>
           
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'space-between', 
-            marginTop: '12px',
-            paddingTop: '10px',
-            borderTop: '1px solid rgba(51, 65, 85, 0.3)',
-          }}>
-            <div style={{ textAlign: 'center', flex: 1 }}>
-              <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Source</div>
-              <div style={{ fontSize: '10px', fontWeight: 500, color: '#e2e8f0' }}>Trump Win Election</div>
+          {miniGraphData && (
+            <>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginTop: '12px',
+                paddingTop: '10px',
+                borderTop: '1px solid rgba(51, 65, 85, 0.3)',
+              }}>
+                <div style={{ textAlign: 'center', flex: 1 }}>
+                  <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Source</div>
+                  <div style={{ fontSize: '10px', fontWeight: 500, color: '#e2e8f0' }}>{miniGraphData.sourceLabel}</div>
+                </div>
+                <div style={{ textAlign: 'center', flex: 1 }}>
+                  <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Target</div>
+                  <div style={{ fontSize: '10px', fontWeight: 500, color: '#e2e8f0' }}>{miniGraphData.targetLabel}</div>
+                </div>
+              </div>
+
+              {miniGraphData.links[0]?.relationship && (
+                <div style={{
+                  marginTop: '10px',
+                  paddingTop: '10px',
+                  borderTop: '1px solid rgba(51, 65, 85, 0.3)',
+                }}>
+                  <span style={{
+                    fontSize: '9px',
+                    fontWeight: 600,
+                    color: getRelationshipColor(miniGraphData.links[0].relationship),
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                  }}>
+                    {miniGraphData.links[0].relationship}
+                  </span>
+                </div>
+              )}
+
+              {miniGraphData.reasoning && (
+                <div style={{
+                  marginTop: '8px',
+                  fontSize: '10px',
+                  color: '#64748b',
+                  lineHeight: 1.4,
+                }}>
+                  {miniGraphData.reasoning}
+                </div>
+              )}
+            </>
+          )}
+          {!miniGraphData && isApiLoading && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '20px 0',
+              gap: '8px',
+            }}>
+              <div style={{
+                width: '20px',
+                height: '20px',
+                border: '2px solid #334155',
+                borderTopColor: '#64748b',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+              }} />
+              <div style={{
+                fontSize: '10px',
+                color: '#64748b',
+              }}>
+                {apiProgress || 'Finding related markets...'}
+              </div>
+              <style>{`
+                @keyframes spin {
+                  to { transform: rotate(360deg); }
+                }
+              `}</style>
             </div>
-            <div style={{ textAlign: 'center', flex: 1 }}>
-              <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Target</div>
-              <div style={{ fontSize: '10px', fontWeight: 500, color: '#e2e8f0' }}>Trump takes Florida</div>
+          )}
+          {!miniGraphData && !isApiLoading && (
+            <div style={{
+              marginTop: '12px',
+              paddingTop: '10px',
+              borderTop: '1px solid rgba(51, 65, 85, 0.3)',
+              fontSize: '10px',
+              color: '#64748b',
+              lineHeight: 1.4,
+              textAlign: 'center',
+            }}>
+              {apiError ? `Error: ${apiError}` : 'No related markets found'}
             </div>
-          </div>
-          
-          <div style={{
-            marginTop: '10px',
-            paddingTop: '10px',
-            borderTop: '1px solid rgba(51, 65, 85, 0.3)',
-            fontSize: '10px',
-            color: '#64748b',
-            lineHeight: 1.4,
-          }}>
-            Florida's probability curve acts as a high-confidence lead indicator.
-          </div>
+          )}
         </div>
       </div>
 
@@ -719,14 +872,18 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
             letterSpacing: '0.2px',
             display: 'block',
             marginBottom: '10px',
-          }}>Accept</span>
+          }}>{miniGraphData ? 'Review Related Market' : 'No Recommendation'}</span>
           <p style={{ 
             margin: 0, 
             fontSize: '11px', 
             color: '#64748b', 
             lineHeight: 1.5,
           }}>
-            Institutional volume in Florida has reached critical mass. Probability drift suggests a 4.2% alpha opportunity.
+            {miniGraphData?.reasoning 
+              ? miniGraphData.reasoning 
+              : apiError 
+                ? 'Unable to analyze related markets. Please try again.' 
+                : 'No related markets found for this event.'}
           </p>
         </motion.div>
       </div>
@@ -956,7 +1113,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
               justifyContent: 'center',
             }}
           >
-            <MascotLoader size={120} />
+            <VideoLoader size={200} />
           </motion.div>
         ) : (
           /* Main Panel */

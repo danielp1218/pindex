@@ -2,12 +2,17 @@ import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import * as Select from '@radix-ui/react-select';
 import * as d3 from 'd3';
+import { MiniGraphData } from '@/hooks/useRelatedBets';
+import { getRelationshipColor } from '@/types/graph';
 
 interface DecisionScreenProps {
   eventTitle: string;
   userSelection: 'yes' | 'no' | null;
   profileImage: string | null;
   onViewNodes: () => void;
+  miniGraphData?: MiniGraphData | null;
+  isLoading?: boolean;
+  error?: string | null;
 }
 
 // Reusable button styles matching landing page
@@ -24,7 +29,15 @@ const buttonBase = {
   boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
 };
 
-export default function DecisionScreen({ eventTitle, userSelection, profileImage, onViewNodes }: DecisionScreenProps) {
+export default function DecisionScreen({
+  eventTitle,
+  userSelection,
+  profileImage,
+  onViewNodes,
+  miniGraphData,
+  isLoading,
+  error,
+}: DecisionScreenProps) {
   const [accepted, setAccepted] = useState<boolean | null>(null);
   const [selectedStrategy, setSelectedStrategy] = useState<string>('trading');
   const [viewNodesHover, setViewNodesHover] = useState(false);
@@ -35,14 +48,8 @@ export default function DecisionScreen({ eventTitle, userSelection, profileImage
   const svgRef = useRef<SVGSVGElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
 
-  // Mini-graph node data
-  const miniGraphNodes = [
-    { id: 'tw', label: 'TW', fullLabel: 'Trump Win Election', x: 70, y: 55 },
-    { id: 'tf', label: 'TF', fullLabel: 'Trump takes Florida', x: 270, y: 55 },
-  ];
-
   useEffect(() => {
-    if (!svgRef.current) return;
+    if (!svgRef.current || !miniGraphData) return;
 
     const width = 340;
     const height = 110;
@@ -59,19 +66,28 @@ export default function DecisionScreen({ eventTitle, userSelection, profileImage
     const g = svg.append('g');
 
     // Create copies of data for D3 (no simulation needed - fixed positions)
-    const nodes = miniGraphNodes.map(d => ({ ...d }));
-    const links = [{ source: nodes[0], target: nodes[1] }];
+    const nodes = miniGraphData.nodes.map(d => ({ ...d }));
+    const links = miniGraphData.links.map(d => ({ ...d, source: nodes[0], target: nodes[1] }));
 
     const nodeRadius = 18;
 
-    // Draw link
+    // Add circular clip path for images
+    const defs = svg.append('defs');
+    defs.append('clipPath')
+      .attr('id', 'decisionMiniCircleClip')
+      .append('circle')
+      .attr('r', nodeRadius - 2)
+      .attr('cx', 0)
+      .attr('cy', 0);
+
+    // Draw link with relationship color
     const link = g.append('g')
       .selectAll('line')
       .data(links)
       .join('line')
-      .attr('stroke', '#334155')
-      .attr('stroke-opacity', 0.5)
-      .attr('stroke-width', 1);
+      .attr('stroke', (d: any) => getRelationshipColor(d.relationship))
+      .attr('stroke-opacity', 0.6)
+      .attr('stroke-width', 2);
 
     // Draw nodes (stationary - no drag)
     const node = g.append('g')
@@ -80,22 +96,38 @@ export default function DecisionScreen({ eventTitle, userSelection, profileImage
       .join('g')
       .style('cursor', 'default');
 
-    // Add circles to nodes
-    node.append('circle')
-      .attr('r', nodeRadius)
-      .attr('fill', '#1e293b')
-      .attr('stroke', '#334155')
-      .attr('stroke-width', 1);
-
-    // Add text labels
-    node.append('text')
-      .text((d: any) => d.label)
-      .attr('text-anchor', 'middle')
-      .attr('dy', '0.35em')
-      .attr('fill', '#64748b')
-      .attr('font-size', '11px')
-      .attr('font-weight', '500')
-      .attr('pointer-events', 'none');
+    // Render nodes with images if available, otherwise circle with text
+    node.each(function(d: any) {
+      const nodeGroup = d3.select(this);
+      
+      if (d.imageUrl) {
+        // Clipped image node
+        nodeGroup.append('image')
+          .attr('href', d.imageUrl)
+          .attr('width', (nodeRadius - 2) * 2)
+          .attr('height', (nodeRadius - 2) * 2)
+          .attr('x', -(nodeRadius - 2))
+          .attr('y', -(nodeRadius - 2))
+          .attr('clip-path', 'url(#decisionMiniCircleClip)')
+          .attr('preserveAspectRatio', 'xMidYMid slice');
+      } else {
+        // Fallback circle with text
+        nodeGroup.append('circle')
+          .attr('r', nodeRadius)
+          .attr('fill', '#1e293b')
+          .attr('stroke', '#334155')
+          .attr('stroke-width', 1);
+        
+        nodeGroup.append('text')
+          .text(d.label)
+          .attr('text-anchor', 'middle')
+          .attr('dy', '0.35em')
+          .attr('fill', '#64748b')
+          .attr('font-size', '11px')
+          .attr('font-weight', '500')
+          .attr('pointer-events', 'none');
+      }
+    });
 
     // Add hover tooltip events
     const tooltip = d3.select(tooltipRef.current);
@@ -124,7 +156,7 @@ export default function DecisionScreen({ eventTitle, userSelection, profileImage
       .attr('y2', (d: any) => d.target.y);
 
     node.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
-  }, []);
+  }, [miniGraphData]);
 
   return (
     <div style={{
@@ -394,34 +426,98 @@ export default function DecisionScreen({ eventTitle, userSelection, profileImage
             </div>
             
             {/* Labels below graph */}
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              marginTop: '12px',
-              paddingTop: '10px',
-              borderTop: '1px solid rgba(51, 65, 85, 0.3)',
-            }}>
-              <div style={{ textAlign: 'center', flex: 1 }}>
-                <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Source</div>
-                <div style={{ fontSize: '10px', fontWeight: 500, color: '#e2e8f0' }}>Trump Win Election</div>
+            {miniGraphData && (
+              <>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginTop: '12px',
+                  paddingTop: '10px',
+                  borderTop: '1px solid rgba(51, 65, 85, 0.3)',
+                }}>
+                  <div style={{ textAlign: 'center', flex: 1 }}>
+                    <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Source</div>
+                    <div style={{ fontSize: '10px', fontWeight: 500, color: '#e2e8f0' }}>{miniGraphData.sourceLabel}</div>
+                  </div>
+                  <div style={{ textAlign: 'center', flex: 1 }}>
+                    <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Target</div>
+                    <div style={{ fontSize: '10px', fontWeight: 500, color: '#e2e8f0' }}>{miniGraphData.targetLabel}</div>
+                  </div>
+                </div>
+
+                {miniGraphData.links[0]?.relationship && (
+                  <div style={{
+                    marginTop: '10px',
+                    paddingTop: '10px',
+                    borderTop: '1px solid rgba(51, 65, 85, 0.3)',
+                  }}>
+                    <span style={{
+                      fontSize: '9px',
+                      fontWeight: 600,
+                      color: getRelationshipColor(miniGraphData.links[0].relationship),
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                    }}>
+                      {miniGraphData.links[0].relationship}
+                    </span>
+                  </div>
+                )}
+
+                {miniGraphData.reasoning && (
+                  <div style={{
+                    marginTop: '8px',
+                    fontSize: '10px',
+                    color: '#64748b',
+                    lineHeight: 1.4,
+                  }}>
+                    {miniGraphData.reasoning}
+                  </div>
+                )}
+              </>
+            )}
+            {!miniGraphData && isLoading && (
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '20px 0',
+                gap: '8px',
+              }}>
+                <div style={{
+                  width: '20px',
+                  height: '20px',
+                  border: '2px solid #334155',
+                  borderTopColor: '#64748b',
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite',
+                }} />
+                <div style={{
+                  fontSize: '10px',
+                  color: '#64748b',
+                }}>
+                  Finding related markets...
+                </div>
+                <style>{`
+                  @keyframes spin {
+                    to { transform: rotate(360deg); }
+                  }
+                `}</style>
               </div>
-              <div style={{ textAlign: 'center', flex: 1 }}>
-                <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Target</div>
-                <div style={{ fontSize: '10px', fontWeight: 500, color: '#e2e8f0' }}>Trump takes Florida</div>
+            )}
+            {!miniGraphData && !isLoading && (
+              <div style={{
+                marginTop: '12px',
+                paddingTop: '10px',
+                borderTop: '1px solid rgba(51, 65, 85, 0.3)',
+                fontSize: '10px',
+                color: '#64748b',
+                lineHeight: 1.4,
+                textAlign: 'center',
+              }}>
+                {error ? `Error: ${error}` : 'No related markets found'}
               </div>
-            </div>
-            
-            {/* Explanation */}
-            <div style={{
-              marginTop: '10px',
-              paddingTop: '10px',
-              borderTop: '1px solid rgba(51, 65, 85, 0.3)',
-              fontSize: '10px',
-              color: '#64748b',
-              lineHeight: 1.4,
-            }}>
-              Florida's probability curve acts as a high-confidence lead indicator.
-            </div>
+            )}
           </div>
         </div>
 
@@ -474,14 +570,18 @@ export default function DecisionScreen({ eventTitle, userSelection, profileImage
               letterSpacing: '0.2px',
               display: 'block',
               marginBottom: '10px',
-            }}>Accept</span>
+            }}>{miniGraphData ? 'Review Related Market' : 'No Recommendation'}</span>
             <p style={{ 
               margin: 0, 
               fontSize: '11px', 
               color: '#64748b', 
               lineHeight: 1.5,
             }}>
-              Institutional volume in Florida has reached critical mass. Probability drift suggests a 4.2% alpha opportunity.
+              {miniGraphData?.reasoning 
+                ? miniGraphData.reasoning 
+                : error 
+                  ? 'Unable to analyze related markets. Please try again.' 
+                  : 'No related markets found for this event.'}
             </p>
           </motion.div>
         </div>

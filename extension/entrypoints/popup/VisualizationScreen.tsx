@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { motion } from 'framer-motion';
-import { GraphData } from '@/types/graph';
+import { GraphData, getRelationshipColor, BetRelationship } from '@/types/graph';
 
 interface VisualizationScreenProps {
   graphData: GraphData;
@@ -10,6 +10,7 @@ interface VisualizationScreenProps {
 function VisualizationScreen({ graphData }: VisualizationScreenProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const edgeTooltipRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!svgRef.current || graphData.nodes.length === 0) return;
@@ -56,14 +57,43 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
         });
       });
 
-    // Draw links - thin and subtle
+    // Draw links with relationship colors
+    const edgeTooltip = d3.select(edgeTooltipRef.current);
     const link = g.append('g')
       .selectAll('line')
       .data(links)
       .join('line')
-      .attr('stroke', '#334155')
-      .attr('stroke-opacity', 0.5)
-      .attr('stroke-width', 1);
+      .attr('stroke', (d: any) => getRelationshipColor(d.relationship))
+      .attr('stroke-opacity', 0.6)
+      .attr('stroke-width', 2)
+      .style('cursor', 'pointer')
+      .on('mouseenter', (event: MouseEvent, d: any) => {
+        // Highlight the edge
+        d3.select(event.target as Element)
+          .attr('stroke-opacity', 1)
+          .attr('stroke-width', 3);
+
+        // Show tooltip with relationship info
+        const relationshipLabel = d.relationship || 'Related';
+        const reasoning = d.reasoning || '';
+        edgeTooltip
+          .style('opacity', '1')
+          .style('left', `${event.offsetX + 15}px`)
+          .style('top', `${event.offsetY - 5}px`)
+          .html(`<strong>${relationshipLabel}</strong>${reasoning ? `<br/>${reasoning}` : ''}`);
+      })
+      .on('mousemove', (event: MouseEvent) => {
+        edgeTooltip
+          .style('left', `${event.offsetX + 15}px`)
+          .style('top', `${event.offsetY - 5}px`);
+      })
+      .on('mouseleave', (event: MouseEvent) => {
+        // Reset edge style
+        d3.select(event.target as Element)
+          .attr('stroke-opacity', 0.6)
+          .attr('stroke-width', 2);
+        edgeTooltip.style('opacity', '0');
+      });
 
     // Draw nodes
     const node = g.append('g')
@@ -153,12 +183,16 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
     // Update positions on each tick
     simulation.on('tick', () => {
       link
-        .attr('x1', (d: any) => d.source.x)
-        .attr('y1', (d: any) => d.source.y)
-        .attr('x2', (d: any) => d.target.x)
-        .attr('y2', (d: any) => d.target.y);
+        .attr('x1', (d: any) => d.source?.x ?? 0)
+        .attr('y1', (d: any) => d.source?.y ?? 0)
+        .attr('x2', (d: any) => d.target?.x ?? 0)
+        .attr('y2', (d: any) => d.target?.y ?? 0);
 
-      node.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
+      node.attr('transform', (d: any) => {
+        const x = d.x ?? 0;
+        const y = d.y ?? 0;
+        return `translate(${x},${y})`;
+      });
     });
 
     // Cleanup
@@ -205,6 +239,25 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
             maxWidth: '180px',
             wordWrap: 'break-word',
             zIndex: 10,
+          }}
+        />
+        <div
+          ref={edgeTooltipRef}
+          style={{
+            position: 'absolute',
+            background: 'rgba(15, 23, 42, 0.95)',
+            color: '#94a3b8',
+            padding: '8px 12px',
+            borderRadius: '6px',
+            fontSize: '11px',
+            fontWeight: 500,
+            pointerEvents: 'none',
+            opacity: 0,
+            transition: 'opacity 0.1s',
+            maxWidth: '220px',
+            wordWrap: 'break-word',
+            zIndex: 11,
+            lineHeight: 1.4,
           }}
         />
       </motion.div>

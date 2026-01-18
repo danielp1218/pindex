@@ -16,5 +16,11 @@ export default defineConfig({
       },
       default_title: 'PolyIndex',
     },
+    web_accessible_resources: [
+      {
+        resources: ['0117.mp4'],
+        matches: ['<all_urls>'],
+      },
+    ],
   },
 });

@@ -282,7 +282,6 @@ export function MascotLoader({ size = 120 }: MascotLoaderProps) {
           marginTop: 8,
         }}
       >
-        Loading...
       </motion.div>
     </div>
   );
