@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
-import { GraphData, Node, Link } from '@/types/graph';
+import { motion } from 'framer-motion';
+import { GraphData } from '@/types/graph';
 
 interface VisualizationScreenProps {
   graphData: GraphData;
@@ -14,7 +15,7 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
     if (!svgRef.current || graphData.nodes.length === 0) return;
 
     const width = 380;
-    const height = 480;
+    const height = 460;
 
     // Clear previous render
     d3.select(svgRef.current).selectAll('*').remove();
@@ -22,7 +23,7 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
     const svg = d3.select(svgRef.current)
       .attr('width', width)
       .attr('height', height)
-      .attr('style', 'border: 1px solid #334155; background: #1e1e1e; border-radius: 12px;');
+      .attr('style', 'background: transparent; overflow: visible;');
 
     // Create a group for zoom/pan
     const g = svg.append('g');
@@ -40,27 +41,36 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
     const nodes = graphData.nodes.map(d => ({ ...d }));
     const links = graphData.links.map(d => ({ ...d }));
 
-    // Create force simulation
+    // Create force simulation - gentler forces for cleaner layout
+    const nodeRadius = 24;
     const simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).id((d: any) => d.id).distance(100))
-      .force('charge', d3.forceManyBody().strength(-300))
+      .force('link', d3.forceLink(links).id((d: any) => d.id).distance(80))
+      .force('charge', d3.forceManyBody().strength(-150))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(30));
+      .force('collision', d3.forceCollide().radius(28))
+      .force('bounds', () => {
+        // Keep nodes within visible bounds
+        nodes.forEach((d: any) => {
+          d.x = Math.max(nodeRadius, Math.min(width - nodeRadius, d.x));
+          d.y = Math.max(nodeRadius, Math.min(height - nodeRadius, d.y));
+        });
+      });
 
-    // Draw links
+    // Draw links - thin and subtle
     const link = g.append('g')
       .selectAll('line')
       .data(links)
       .join('line')
-      .attr('stroke', '#999')
-      .attr('stroke-opacity', 0.6)
-      .attr('stroke-width', 2);
+      .attr('stroke', '#334155')
+      .attr('stroke-opacity', 0.5)
+      .attr('stroke-width', 1);
 
     // Draw nodes
     const node = g.append('g')
       .selectAll('g')
       .data(nodes)
       .join('g')
+      .style('cursor', 'grab')
       .call(d3.drag<any, any>()
         .on('start', (event, d: any) => {
           if (!event.active) simulation.alphaTarget(0.3).restart();
@@ -90,8 +100,9 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
     // Add market images or fallback circles to nodes
     node.each(function(d: any) {
       const nodeGroup = d3.select(this);
+      
       if (d.imageUrl) {
-        // Use the market image from the page
+        // Just the clipped image, no border
         nodeGroup.append('image')
           .attr('href', d.imageUrl)
           .attr('width', 40)
@@ -101,24 +112,21 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
           .attr('clip-path', 'url(#circleClip)')
           .attr('preserveAspectRatio', 'xMidYMid slice');
       } else {
-        // Fallback to teal circle for nodes without images
+        // Minimal circle for nodes without images
         nodeGroup.append('circle')
-          .attr('r', 20)
-          .attr('fill', '#69b3a2')
-          .attr('stroke', '#fff')
-          .attr('stroke-width', 2);
-      }
-    });
-
-    // Add labels only to nodes without images (fallback nodes)
-    node.each(function(d: any) {
-      if (!d.imageUrl) {
-        d3.select(this).append('text')
-          .text(d.label)
+          .attr('r', 18)
+          .attr('fill', '#1e293b')
+          .attr('stroke', '#334155')
+          .attr('stroke-width', 1);
+        
+        // Small label inside
+        nodeGroup.append('text')
+          .text(d.label.substring(0, 2).toUpperCase())
           .attr('text-anchor', 'middle')
           .attr('dy', '0.35em')
-          .attr('fill', '#fff')
-          .attr('font-size', '10px')
+          .attr('fill', '#64748b')
+          .attr('font-size', '9px')
+          .attr('font-weight', '500')
           .attr('pointer-events', 'none');
       }
     });
@@ -129,14 +137,14 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
       .on('mouseenter', (event: MouseEvent, d: any) => {
         tooltip
           .style('opacity', '1')
-          .style('left', `${event.offsetX + 10}px`)
-          .style('top', `${event.offsetY - 10}px`)
+          .style('left', `${event.offsetX + 15}px`)
+          .style('top', `${event.offsetY - 5}px`)
           .text(d.label);
       })
       .on('mousemove', (event: MouseEvent) => {
         tooltip
-          .style('left', `${event.offsetX + 10}px`)
-          .style('top', `${event.offsetY - 10}px`);
+          .style('left', `${event.offsetX + 15}px`)
+          .style('top', `${event.offsetY - 5}px`);
       })
       .on('mouseleave', () => {
         tooltip.style('opacity', '0');
@@ -161,36 +169,45 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
 
   if (graphData.nodes.length === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: '50px' }}>
-        <p>No nodes to display. Switch to "Add Nodes" to create some.</p>
+      <div style={{ 
+        textAlign: 'center', 
+        padding: '80px 20px',
+        color: '#475569',
+        fontSize: '13px',
+      }}>
+        <p style={{ margin: 0 }}>No nodes yet</p>
       </div>
     );
   }
 
   return (
-    <div style={{ position: 'relative' }}>
-      <svg ref={svgRef}></svg>
-      <div
-        ref={tooltipRef}
-        style={{
-          position: 'absolute',
-          background: '#1e293b',
-          color: '#e2e8f0',
-          padding: '8px 12px',
-          borderRadius: '6px',
-          fontSize: '12px',
-          pointerEvents: 'none',
-          opacity: 0,
-          transition: 'opacity 0.15s',
-          maxWidth: '200px',
-          wordWrap: 'break-word',
-          border: '1px solid #334155',
-          zIndex: 10,
-        }}
-      />
-      <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
-        <p style={{ margin: 0 }}>Drag nodes to move. Scroll to zoom.</p>
-      </div>
+    <div style={{ position: 'relative', overflow: 'visible' }}>
+      {/* Graph content */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+      >
+        <svg ref={svgRef} style={{ overflow: 'visible' }}></svg>
+        <div
+          ref={tooltipRef}
+          style={{
+            position: 'absolute',
+            background: 'rgba(15, 23, 42, 0.95)',
+            color: '#94a3b8',
+            padding: '6px 10px',
+            borderRadius: '6px',
+            fontSize: '11px',
+            fontWeight: 500,
+            pointerEvents: 'none',
+            opacity: 0,
+            transition: 'opacity 0.1s',
+            maxWidth: '180px',
+            wordWrap: 'break-word',
+            zIndex: 10,
+          }}
+        />
+      </motion.div>
     </div>
   );
 }

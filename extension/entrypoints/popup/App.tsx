@@ -19,6 +19,9 @@ function App() {
     nodes: [{ id: 'root', label: 'Root' }],
     links: [],
   });
+  const [backHover, setBackHover] = useState(false);
+  const [graphHover, setGraphHover] = useState(false);
+  const [addHover, setAddHover] = useState(false);
 
   useEffect(() => {
     const initialize = async () => {
@@ -148,53 +151,74 @@ function App() {
 
   // Nodes screens
   return (
-    <div style={{ padding: '20px', width: '420px', minWidth: '420px', maxWidth: '420px', height: '600px', maxHeight: '600px', background: '#0a0f1a', color: '#e2e8f0', boxSizing: 'border-box', overflowY: 'auto', overflowX: 'hidden' }}>
-      <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+    <div style={{ padding: '16px 20px', width: '420px', minWidth: '420px', maxWidth: '420px', height: '600px', maxHeight: '600px', background: '#0a0f1a', color: '#e2e8f0', boxSizing: 'border-box', overflow: 'hidden' }}>
+      <div style={{ marginBottom: '12px', display: 'flex', gap: '8px', alignItems: 'center' }}>
         <button
           onClick={() => setCurrentScreen('decision')}
+          onMouseEnter={() => setBackHover(true)}
+          onMouseLeave={() => setBackHover(false)}
           style={{
-            background: '#1e293b',
+            background: 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)',
             color: '#e2e8f0',
-            border: '1px solid #334155',
-            padding: '8px 0',
+            border: backHover ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+            padding: '6px 12px',
             borderRadius: '8px',
             cursor: 'pointer',
-            width: '80px',
-            fontSize: '12px',
+            fontSize: '11px',
+            fontWeight: 500,
+            transition: 'all 0.2s ease',
+            boxShadow: backHover ? '0 8px 32px rgba(70, 100, 140, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.15)',
+            filter: backHover ? 'brightness(1.25)' : 'brightness(1)',
           }}
         >
-          ← Back
+          Back
         </button>
-        <h2 style={{ margin: 0, flex: 1, fontSize: '16px' }}>Polyindex</h2>
+        <div style={{ flex: 1 }} />
         <button
           onClick={() => setCurrentScreen('visualize')}
+          onMouseEnter={() => setGraphHover(true)}
+          onMouseLeave={() => setGraphHover(false)}
           style={{
-            background: currentScreen === 'visualize' ? '#3b82f6' : '#1e293b',
-            color: '#e2e8f0',
-            border: '1px solid #334155',
-            padding: '8px 0',
+            background: currentScreen === 'visualize' 
+              ? 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)' 
+              : graphHover 
+                ? 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)'
+                : 'transparent',
+            color: currentScreen === 'visualize' || graphHover ? '#e2e8f0' : '#64748b',
+            border: currentScreen === 'visualize' || graphHover 
+              ? '1px solid rgba(255, 255, 255, 0.3)' 
+              : '1px solid transparent',
+            padding: '6px 12px',
             borderRadius: '8px',
             cursor: 'pointer',
-            width: '80px',
-            fontSize: '12px',
+            fontSize: '11px',
+            fontWeight: 500,
+            transition: 'all 0.2s ease',
+            boxShadow: graphHover ? '0 8px 32px rgba(70, 100, 140, 0.3)' : currentScreen === 'visualize' ? '0 2px 8px rgba(0, 0, 0, 0.15)' : 'none',
+            filter: graphHover && currentScreen !== 'visualize' ? 'brightness(1.25)' : 'brightness(1)',
           }}
         >
-          Visualize
+          Graph
         </button>
         <button
           onClick={() => setCurrentScreen('add')}
+          onMouseEnter={() => setAddHover(true)}
+          onMouseLeave={() => setAddHover(false)}
           style={{
-            background: currentScreen === 'add' ? '#3b82f6' : '#1e293b',
+            background: 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)',
             color: '#e2e8f0',
-            border: '1px solid #334155',
-            padding: '8px 0',
+            border: addHover ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+            padding: '6px 12px',
             borderRadius: '8px',
             cursor: 'pointer',
-            width: '80px',
-            fontSize: '12px',
+            fontSize: '11px',
+            fontWeight: 500,
+            transition: 'all 0.2s ease',
+            boxShadow: addHover ? '0 8px 32px rgba(70, 100, 140, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.15)',
+            filter: addHover ? 'brightness(1.25)' : 'brightness(1)',
           }}
         >
-          Add Nodes
+          Add
         </button>
       </div>
       
