@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as d3 from 'd3';
+import { MascotLoader } from './MascotLoader';
 
 interface OverlayAppProps {
   isVisible: boolean;
@@ -43,6 +44,7 @@ const buttonBase: React.CSSProperties = {
 };
 
 export function OverlayApp({ isVisible, onClose, profileImage: initialProfileImage }: OverlayAppProps) {
+  const [isLoading, setIsLoading] = useState(true);
   const [currentScreen, setCurrentScreen] = useState<Screen>('decision');
   const [userSelection, setUserSelection] = useState<'yes' | 'no' | null>(null);
   const [profileImage, setProfileImage] = useState<string | null>(initialProfileImage || null);
@@ -141,117 +143,125 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
 
   // D3 Mini Graph Effect (for decision screen)
   useEffect(() => {
-    if (!svgRef.current || !isVisible || currentScreen !== 'decision') return;
+    if (!isVisible || isLoading || currentScreen !== 'decision') return;
 
-    const width = 340;
-    const height = 110;
+    let simulation: d3.Simulation<any, undefined> | null = null;
 
-    d3.select(svgRef.current).selectAll('*').remove();
+    // Small delay to ensure DOM is mounted after loading completes
+    const timeoutId = setTimeout(() => {
+      if (!svgRef.current) return;
 
-    const svg = d3.select(svgRef.current)
-      .attr('width', width)
-      .attr('height', height)
-      .attr('style', 'background: transparent; overflow: visible;');
+      const width = 340;
+      const height = 110;
 
-    const g = svg.append('g');
+      d3.select(svgRef.current).selectAll('*').remove();
 
-    const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 4])
-      .on('zoom', (event) => {
-        g.attr('transform', event.transform);
+      const svg = d3.select(svgRef.current)
+        .attr('width', width)
+        .attr('height', height)
+        .attr('style', 'background: transparent; overflow: visible;');
+
+      const g = svg.append('g');
+
+      const zoom = d3.zoom<SVGSVGElement, unknown>()
+        .scaleExtent([0.1, 4])
+        .on('zoom', (event) => {
+          g.attr('transform', event.transform);
+        });
+
+      svg.call(zoom);
+
+      const nodes = miniGraphNodes.map(d => ({ ...d }));
+      const links = [{ source: nodes[0], target: nodes[1] }];
+
+      const nodeRadius = 18;
+      simulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).distance(200))
+        .alphaDecay(0.05);
+
+      const link = g.append('g')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('stroke', '#334155')
+        .attr('stroke-opacity', 0.5)
+        .attr('stroke-width', 1);
+
+      const node = g.append('g')
+        .selectAll('g')
+        .data(nodes)
+        .join('g')
+        .style('cursor', 'grab')
+        .call(d3.drag<any, any>()
+          .on('start', (event, d: any) => {
+            if (!event.active) simulation?.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+          })
+          .on('drag', (event, d: any) => {
+            d.fx = event.x;
+            d.fy = event.y;
+          })
+          .on('end', (event, d: any) => {
+            if (!event.active) simulation?.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+          })
+        );
+
+      node.append('circle')
+        .attr('r', nodeRadius)
+        .attr('fill', '#1e293b')
+        .attr('stroke', '#334155')
+        .attr('stroke-width', 1);
+
+      node.append('text')
+        .text((d: any) => d.label)
+        .attr('text-anchor', 'middle')
+        .attr('dy', '0.35em')
+        .attr('fill', '#64748b')
+        .attr('font-size', '11px')
+        .attr('font-weight', '500')
+        .attr('pointer-events', 'none');
+
+      const tooltip = d3.select(tooltipRef.current);
+      node
+        .on('mouseenter', (event: MouseEvent, d: any) => {
+          tooltip
+            .style('opacity', '1')
+            .style('left', `${event.offsetX + 15}px`)
+            .style('top', `${event.offsetY - 5}px`)
+            .text(d.fullLabel);
+        })
+        .on('mousemove', (event: MouseEvent) => {
+          tooltip
+            .style('left', `${event.offsetX + 15}px`)
+            .style('top', `${event.offsetY - 5}px`);
+        })
+        .on('mouseleave', () => {
+          tooltip.style('opacity', '0');
+        });
+
+      simulation.on('tick', () => {
+        link
+          .attr('x1', (d: any) => d.source.x)
+          .attr('y1', (d: any) => d.source.y)
+          .attr('x2', (d: any) => d.target.x)
+          .attr('y2', (d: any) => d.target.y);
+
+        node.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
       });
-
-    svg.call(zoom);
-
-    const nodes = miniGraphNodes.map(d => ({ ...d }));
-    const links = [{ source: nodes[0], target: nodes[1] }];
-
-    const nodeRadius = 18;
-    const simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).distance(200))
-      .alphaDecay(0.05);
-
-    const link = g.append('g')
-      .selectAll('line')
-      .data(links)
-      .join('line')
-      .attr('stroke', '#334155')
-      .attr('stroke-opacity', 0.5)
-      .attr('stroke-width', 1);
-
-    const node = g.append('g')
-      .selectAll('g')
-      .data(nodes)
-      .join('g')
-      .style('cursor', 'grab')
-      .call(d3.drag<any, any>()
-        .on('start', (event, d: any) => {
-          if (!event.active) simulation.alphaTarget(0.3).restart();
-          d.fx = d.x;
-          d.fy = d.y;
-        })
-        .on('drag', (event, d: any) => {
-          d.fx = event.x;
-          d.fy = event.y;
-        })
-        .on('end', (event, d: any) => {
-          if (!event.active) simulation.alphaTarget(0);
-          d.fx = null;
-          d.fy = null;
-        })
-      );
-
-    node.append('circle')
-      .attr('r', nodeRadius)
-      .attr('fill', '#1e293b')
-      .attr('stroke', '#334155')
-      .attr('stroke-width', 1);
-
-    node.append('text')
-      .text((d: any) => d.label)
-      .attr('text-anchor', 'middle')
-      .attr('dy', '0.35em')
-      .attr('fill', '#64748b')
-      .attr('font-size', '11px')
-      .attr('font-weight', '500')
-      .attr('pointer-events', 'none');
-
-    const tooltip = d3.select(tooltipRef.current);
-    node
-      .on('mouseenter', (event: MouseEvent, d: any) => {
-        tooltip
-          .style('opacity', '1')
-          .style('left', `${event.offsetX + 15}px`)
-          .style('top', `${event.offsetY - 5}px`)
-          .text(d.fullLabel);
-      })
-      .on('mousemove', (event: MouseEvent) => {
-        tooltip
-          .style('left', `${event.offsetX + 15}px`)
-          .style('top', `${event.offsetY - 5}px`);
-      })
-      .on('mouseleave', () => {
-        tooltip.style('opacity', '0');
-      });
-
-    simulation.on('tick', () => {
-      link
-        .attr('x1', (d: any) => d.source.x)
-        .attr('y1', (d: any) => d.source.y)
-        .attr('x2', (d: any) => d.target.x)
-        .attr('y2', (d: any) => d.target.y);
-
-      node.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
-    });
+    }, 350);
 
     return () => {
-      simulation.stop();
+      clearTimeout(timeoutId);
+      simulation?.stop();
     };
-  }, [isVisible, currentScreen]);
+  }, [isVisible, isLoading, currentScreen]);
 
   // D3 Full Visualization Graph (for visualize screen)
   useEffect(() => {
-    if (!vizSvgRef.current || !isVisible || currentScreen !== 'visualize') return;
+    if (!vizSvgRef.current || !isVisible || isLoading || currentScreen !== 'visualize') return;
 
     const width = 380;
     const height = 420;
@@ -388,7 +398,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     return () => {
       simulation.stop();
     };
-  }, [isVisible, currentScreen, graphData]);
+  }, [isVisible, isLoading, currentScreen, graphData]);
 
   // Close on Escape key
   useEffect(() => {
@@ -410,6 +420,17 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
   useEffect(() => {
     if (isVisible) {
       setPosition(null);
+    }
+  }, [isVisible]);
+
+  // Fake loading time - show mascot for 2.5 seconds (remove this later)
+  useEffect(() => {
+    if (isVisible) {
+      setIsLoading(true);
+      const timer = setTimeout(() => {
+        setIsLoading(false);
+      }, 2500);
+      return () => clearTimeout(timer);
     }
   }, [isVisible]);
 
@@ -914,26 +935,50 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
   );
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {isVisible && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'rgba(0, 0, 0, 0.5)',
-            backdropFilter: 'blur(4px)',
-            zIndex: 99998,
-            pointerEvents: 'auto',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-          onClick={onClose}
-        >
+        isLoading ? (
+          /* Full-screen Loading State */
+          <motion.div
+            key="loading-screen"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'linear-gradient(145deg, #0f1520 0%, #0a0e16 50%, #080c12 100%)',
+              zIndex: 99998,
+              pointerEvents: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <MascotLoader size={120} />
+          </motion.div>
+        ) : (
+          /* Main Panel */
+          <motion.div
+            key="main-panel"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'rgba(0, 0, 0, 0.5)',
+              backdropFilter: 'blur(4px)',
+              zIndex: 99998,
+              pointerEvents: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            onClick={onClose}
+          >
           {/* Panel */}
           <motion.div
             ref={overlayRef}
@@ -987,7 +1032,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
               zIndex: 2,
               borderRadius: '20px 20px 0 0',
             }} />
-            
+
             {/* Header */}
             <div 
               data-draggable="true"
@@ -1155,6 +1200,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
             </div>
           </motion.div>
         </motion.div>
+        )
       )}
     </AnimatePresence>
   );
