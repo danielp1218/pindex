@@ -1,12 +1,45 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import './App.css';
-import { GraphData } from '@/types/graph';
-import { getCurrentPageState, saveCurrentPageState } from '@/utils/eventStorage';
+import { getDependencyState, getEventIdFromUrl, type DependencyQueueItem } from '@/utils/eventStorage';
+import { processDependencyDecisionInBackground } from '@/utils/dependencyWorker';
+import type { GraphData, BetRelationship } from '@/types/graph';
+import type { RelationGraphNode } from '@/types/relationGraph';
+import {
+  addQueueItemToGraph,
+  createRootGraph,
+  flattenGraph,
+  graphToGraphData,
+  loadRelationGraph,
+  saveRelationGraph,
+  updateNodeImage,
+  updateNodeFromSource,
+  updateRootMetadata,
+} from '@/utils/relationGraph';
+import {
+  computeOutcomeDelta,
+  fetchGraphOutcomes,
+  type GraphOutcomeResult,
+  type GraphOutcomeDelta,
+} from '@/utils/globalsApi';
+import { fetchEventInfoFromUrl, type PolymarketEventInfo } from '@/utils/polymarketClient';
 import DecisionScreen from './DecisionScreen.tsx';
 import AddNodesScreen from './AddNodesScreen.tsx';
 import VisualizationScreen from './VisualizationScreen.tsx';
 
 type Screen = 'decision' | 'add' | 'visualize';
+
+function findNodeById(node: RelationGraphNode, id: string): RelationGraphNode | null {
+  if (node.id === id) {
+    return node;
+  }
+  for (const child of node.children ?? []) {
+    const found = findNodeById(child, id);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
 
 function App() {
   const [pageUrl, setPageUrl] = useState<string | null>(null);
@@ -15,13 +48,127 @@ function App() {
   const [userSelection, setUserSelection] = useState<'yes' | 'no' | null>(null);
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [marketImageUrl, setMarketImageUrl] = useState<string | null>(null);
-  const [graphData, setGraphData] = useState<GraphData>({
-    nodes: [{ id: 'root', label: 'Root' }],
-    links: [],
-  });
+  const [eventImageUrl, setEventImageUrl] = useState<string | null>(null);
+  const [relationGraph, setRelationGraph] = useState<RelationGraphNode | null>(null);
+  const [dependencyQueue, setDependencyQueue] = useState<DependencyQueueItem[]>([]);
+  const [dependencyVisited, setDependencyVisited] = useState<string[]>([]);
+  const [rootInfo, setRootInfo] = useState<PolymarketEventInfo | null>(null);
+  const [isProcessingDecision, setIsProcessingDecision] = useState(false);
+  const [globalsBaseline, setGlobalsBaseline] = useState<GraphOutcomeResult | null>(null);
+  const [globalsCandidate, setGlobalsCandidate] = useState<GraphOutcomeResult | null>(null);
+  const [globalsDelta, setGlobalsDelta] = useState<GraphOutcomeDelta | null>(null);
+  const [globalsError, setGlobalsError] = useState<string | null>(null);
+  const [globalsLoading, setGlobalsLoading] = useState(false);
   const [backHover, setBackHover] = useState(false);
   const [graphHover, setGraphHover] = useState(false);
   const [addHover, setAddHover] = useState(false);
+  const imageFetchRef = useRef(new Set<string>());
+
+  const rootId = useMemo(
+    () => (pageUrl ? getEventIdFromUrl(pageUrl) ?? 'root' : 'root'),
+    [pageUrl]
+  );
+  const queuedItem = dependencyQueue[0] ?? null;
+  const hasVisitedRoot = useMemo(
+    () => dependencyVisited.some(url => getEventIdFromUrl(url) === rootId),
+    [dependencyVisited, rootId]
+  );
+  const fallbackTitle = useMemo(() => {
+    if (!pageUrl) return 'Market Decision';
+    const slug = pageUrl.split('/event/')[1]?.split('?')[0] || '';
+    return slug.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()) || 'Market Decision';
+  }, [pageUrl]);
+  const eventTitle = rootInfo?.question ?? fallbackTitle;
+  const rootDecision = userSelection ?? 'yes';
+  const rootFallbackItem = useMemo<DependencyQueueItem | null>(() => {
+    if (!pageUrl || hasVisitedRoot) {
+      return null;
+    }
+    return {
+      id: rootId,
+      url: pageUrl,
+      weight: 1,
+      decision: rootDecision,
+      relation: '',
+      question: eventTitle,
+    };
+  }, [pageUrl, hasVisitedRoot, rootId, rootDecision, eventTitle]);
+  const displayItem = queuedItem ?? rootFallbackItem;
+  const queueEmpty = !displayItem && hasVisitedRoot;
+  const decisionDisabled = isProcessingDecision || !displayItem || !relationGraph;
+
+  const graphView = useMemo<GraphData>(() => {
+    if (!relationGraph) {
+      return { nodes: [], links: [] };
+    }
+    return graphToGraphData(relationGraph);
+  }, [relationGraph]);
+
+  const miniGraphData = useMemo(() => {
+    if (!relationGraph || !displayItem) {
+      return null;
+    }
+
+    const targetLabel = displayItem.question ?? displayItem.id;
+    const hasSource = Boolean(displayItem.sourceQuestion || displayItem.parentId);
+
+    const createAbbreviation = (label: string) => {
+      const words = label.split(/\s+/).filter(word => word.length > 2);
+      const parts = (words.length > 0 ? words : label.split(/\s+/)).slice(0, 2);
+      const abbrev = parts.map(word => word[0]?.toUpperCase()).join('');
+      return abbrev || label.slice(0, 2).toUpperCase();
+    };
+
+    const targetNode = {
+      id: displayItem.id,
+      label: createAbbreviation(targetLabel),
+      fullLabel: targetLabel,
+      x: hasSource ? 270 : 170,
+      y: 55,
+    };
+
+    if (!hasSource) {
+      return {
+        nodes: [targetNode],
+        links: [],
+        sourceLabel: '',
+        targetLabel,
+        reasoning: displayItem.explanation ?? '',
+        sourceImageUrl: undefined,
+      };
+    }
+
+    const sourceNode = displayItem.parentId
+      ? findNodeById(relationGraph, displayItem.parentId) ?? relationGraph
+      : relationGraph;
+    const sourceLabel = displayItem.sourceQuestion ?? sourceNode.label ?? sourceNode.id;
+
+    return {
+      nodes: [
+        {
+          id: sourceNode.id,
+          label: createAbbreviation(sourceLabel),
+          fullLabel: sourceLabel,
+          x: 70,
+          y: 55,
+          imageUrl: sourceNode.imageUrl,
+        },
+        targetNode,
+      ],
+      links: [
+        {
+          source: sourceNode.id,
+          target: displayItem.id,
+          relationship: displayItem.relation as BetRelationship,
+          reasoning: displayItem.explanation,
+        },
+      ],
+      sourceLabel,
+      targetLabel,
+      reasoning: displayItem.explanation ?? '',
+      sourceImageUrl: sourceNode.imageUrl,
+    };
+  }, [relationGraph, displayItem]);
 
   useEffect(() => {
     const initialize = async () => {
@@ -52,12 +199,14 @@ function App() {
           const eventTitle = slug.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Market';
 
           let currentMarketImageUrl: string | null = null;
+          let selection: 'yes' | 'no' | null = userSelection;
 
           // Also try to get selection and images from content script
           try {
             const response = await browser.tabs.sendMessage(tab.id, { action: 'getPageInfo' });
             if (response?.userSelection) {
               setUserSelection(response.userSelection);
+              selection = response.userSelection;
             }
             if (response?.profileImage) {
               setProfileImage(response.profileImage);
@@ -74,25 +223,24 @@ function App() {
             console.error('Error getting page info:', error);
           }
 
-          // Try to load saved state, or create initial state with market info
           try {
-            const savedState = await getCurrentPageState(tab.url);
-            if (savedState && savedState.graphData) {
-              setGraphData(savedState.graphData);
-            } else {
-              // No saved state - create initial graph with market title and image
-              setGraphData({
-                nodes: [{ id: 'root', label: eventTitle, imageUrl: currentMarketImageUrl || undefined }],
-                links: [],
-              });
-            }
-          } catch (error) {
-            console.error('Error loading saved state:', error);
-            // On error, still set up with market info
-            setGraphData({
-              nodes: [{ id: 'root', label: eventTitle, imageUrl: currentMarketImageUrl || undefined }],
-              links: [],
+            const graph = await loadRelationGraph({
+              url: tab.url,
+              title: eventTitle,
+              imageUrl: currentMarketImageUrl || undefined,
+              decision: selection ?? undefined,
             });
+            setRelationGraph(graph);
+          } catch (error) {
+            console.error('Error loading relation graph:', error);
+            const graph = createRootGraph({
+              url: tab.url,
+              title: eventTitle,
+              imageUrl: currentMarketImageUrl || undefined,
+              decision: selection ?? undefined,
+            });
+            setRelationGraph(graph);
+            await saveRelationGraph(tab.url, graph);
           }
         } else {
           setPageUrl(null);
@@ -106,18 +254,222 @@ function App() {
     initialize();
   }, []);
 
-  const saveGraphData = async (newGraphData: GraphData) => {
-    setGraphData(newGraphData);
-    if (pageUrl) {
-      await saveCurrentPageState(pageUrl, { graphData: newGraphData });
+  useEffect(() => {
+    if (!pageUrl) {
+      return;
+    }
+
+    let isActive = true;
+
+    const loadQueue = async () => {
+      const state = await getDependencyState(pageUrl);
+      if (isActive) {
+        setDependencyQueue(state.queue);
+        setDependencyVisited(state.visited);
+      }
+    };
+
+    loadQueue();
+
+    const handleChange = () => {
+      void loadQueue();
+    };
+
+    browser.storage.onChanged.addListener(handleChange);
+    return () => {
+      isActive = false;
+      browser.storage.onChanged.removeListener(handleChange);
+    };
+  }, [pageUrl]);
+
+  useEffect(() => {
+    if (!pageUrl) {
+      return;
+    }
+
+    let isActive = true;
+    const loadRootInfo = async () => {
+      const info = await fetchEventInfoFromUrl(pageUrl);
+      if (isActive) {
+        setRootInfo(info);
+        if (info?.imageUrl) {
+          setEventImageUrl(info.imageUrl);
+        }
+      }
+    };
+
+    void loadRootInfo();
+    return () => {
+      isActive = false;
+    };
+  }, [pageUrl]);
+
+  useEffect(() => {
+    if (!pageUrl || !relationGraph) {
+      return;
+    }
+
+    const nextGraph = updateRootMetadata(relationGraph, {
+      title: eventTitle,
+      imageUrl: eventImageUrl || marketImageUrl || profileImage || undefined,
+      decision: userSelection ?? undefined,
+    });
+
+    if (nextGraph !== relationGraph) {
+      setRelationGraph(nextGraph);
+      void saveRelationGraph(pageUrl, nextGraph);
+    }
+  }, [pageUrl, relationGraph, eventImageUrl, marketImageUrl, profileImage, userSelection, eventTitle]);
+
+  useEffect(() => {
+    if (!pageUrl || !relationGraph) {
+      return;
+    }
+
+    let isActive = true;
+    const nodesNeedingImages = flattenGraph(relationGraph)
+      .filter(node => node.url && !node.imageUrl)
+      .filter(node => !imageFetchRef.current.has(node.url as string));
+
+    if (nodesNeedingImages.length === 0) {
+      return;
+    }
+
+    const hydrateImages = async () => {
+      let nextGraph = relationGraph;
+
+      for (const node of nodesNeedingImages) {
+        const url = node.url as string;
+        imageFetchRef.current.add(url);
+        const info = await fetchEventInfoFromUrl(url);
+        if (!isActive) {
+          return;
+        }
+        if (info?.imageUrl) {
+          nextGraph = updateNodeImage(nextGraph, node.id, info.imageUrl);
+        }
+      }
+
+      if (nextGraph !== relationGraph && isActive) {
+        setRelationGraph(nextGraph);
+        await saveRelationGraph(pageUrl, nextGraph);
+      }
+    };
+
+    void hydrateImages();
+    return () => {
+      isActive = false;
+    };
+  }, [pageUrl, relationGraph]);
+
+  useEffect(() => {
+    if (!relationGraph) {
+      setGlobalsBaseline(null);
+      setGlobalsCandidate(null);
+      setGlobalsDelta(null);
+      return;
+    }
+
+    let isActive = true;
+
+    const loadGlobals = async () => {
+      setGlobalsLoading(true);
+      setGlobalsError(null);
+
+      try {
+        const baselineGraph = relationGraph;
+        const baseline = await fetchGraphOutcomes(baselineGraph);
+
+        let candidate: GraphOutcomeResult | null = null;
+        if (queuedItem) {
+          const candidateGraph = addQueueItemToGraph(
+            relationGraph,
+            queuedItem,
+            relationGraph.id
+          );
+          candidate = await fetchGraphOutcomes(candidateGraph);
+        }
+
+        if (!isActive) {
+          return;
+        }
+
+        setGlobalsBaseline(baseline);
+        setGlobalsCandidate(candidate ?? baseline);
+        setGlobalsDelta(queuedItem && candidate ? computeOutcomeDelta(baseline, candidate) : null);
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+        setGlobalsError((error as Error).message || 'Failed to fetch globals.');
+        setGlobalsBaseline(null);
+        setGlobalsCandidate(null);
+        setGlobalsDelta(null);
+      } finally {
+        if (isActive) {
+          setGlobalsLoading(false);
+        }
+      }
+    };
+
+    void loadGlobals();
+    return () => {
+      isActive = false;
+    };
+  }, [relationGraph, queuedItem]);
+
+  const handleDecision = async (accept: boolean, risk: number) => {
+    if (!pageUrl || !relationGraph || isProcessingDecision) {
+      return;
+    }
+
+    setIsProcessingDecision(true);
+    const selectedItem = queuedItem ?? rootFallbackItem;
+    const isRootFallback = Boolean(selectedItem && !queuedItem);
+
+    let nextGraph = relationGraph;
+    if (accept && selectedItem && !isRootFallback) {
+      nextGraph = addQueueItemToGraph(relationGraph, selectedItem, relationGraph.id);
+    }
+
+    try {
+      const result = await processDependencyDecisionInBackground({
+        eventUrl: pageUrl,
+        keep: accept,
+        fallbackDecision: selectedItem?.decision ?? rootDecision,
+        fallbackWeight: selectedItem?.weight ?? 1,
+        risk,
+      });
+
+      setDependencyQueue(result.queue);
+      setDependencyVisited(result.visited);
+
+      if (accept) {
+        const targetId = selectedItem?.id ?? rootId;
+        nextGraph = updateNodeFromSource(
+          nextGraph,
+          targetId,
+          result.response?.sourceMarket,
+          selectedItem?.decision
+        );
+      }
+
+      if (nextGraph !== relationGraph) {
+        setRelationGraph(nextGraph);
+        await saveRelationGraph(pageUrl, nextGraph);
+      }
+    } catch (error) {
+      console.error('Failed to process decision', error);
+    } finally {
+      setIsProcessingDecision(false);
     }
   };
 
-  // Extract event title from URL
-  const getEventTitle = () => {
-    if (!pageUrl) return 'Market Decision';
-    const slug = pageUrl.split('/event/')[1]?.split('?')[0] || '';
-    return slug.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()) || 'Market Decision';
+  const saveGraphData = async (newGraph: RelationGraphNode) => {
+    setRelationGraph(newGraph);
+    if (pageUrl) {
+      await saveRelationGraph(pageUrl, newGraph);
+    }
   };
 
   if (loading) {
@@ -197,12 +549,39 @@ function App() {
 
   // Decision Screen (main)
   if (currentScreen === 'decision') {
+    if (queueEmpty) {
+      return (
+        <div style={{
+          minWidth: '420px',
+          minHeight: '600px',
+          background: '#0a0f1a',
+          color: '#e2e8f0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontFamily: 'Inter, system-ui, sans-serif',
+        }}>
+          <span style={{ fontSize: '13px', color: '#94a3b8', letterSpacing: '0.4px' }}>
+            calculating...
+          </span>
+        </div>
+      );
+    }
     return (
       <DecisionScreen
-        eventTitle={getEventTitle()}
+        eventTitle={displayItem?.question ?? eventTitle}
         userSelection={userSelection}
-        profileImage={profileImage}
+        profileImage={eventImageUrl || marketImageUrl || profileImage}
         onViewNodes={() => setCurrentScreen('visualize')}
+        onDecision={handleDecision}
+        isProcessing={decisionDisabled}
+        miniGraphData={miniGraphData}
+        showUserSelection={Boolean(rootFallbackItem && !queuedItem)}
+        globalsBaseline={globalsBaseline}
+        globalsCandidate={globalsCandidate}
+        globalsDelta={globalsDelta}
+        globalsLoading={globalsLoading}
+        globalsError={globalsError}
       />
     );
   }
@@ -281,9 +660,13 @@ function App() {
       </div>
       
       {currentScreen === 'visualize' ? (
-        <VisualizationScreen graphData={graphData} />
+        <VisualizationScreen graphData={graphView} />
       ) : (
-        <AddNodesScreen graphData={graphData} onGraphUpdate={saveGraphData} marketImageUrl={marketImageUrl} />
+        <AddNodesScreen
+          relationGraph={relationGraph ?? createRootGraph({ url: pageUrl ?? 'root' })}
+          onGraphUpdate={saveGraphData}
+          marketImageUrl={eventImageUrl || marketImageUrl || profileImage}
+        />
       )}
     </div>
   );

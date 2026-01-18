@@ -1,26 +1,52 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import * as Select from '@radix-ui/react-select';
 import * as d3 from 'd3';
-import { MiniGraphData } from '@/hooks/useRelatedBets';
-import { getRelationshipColor } from '@/types/graph';
+import { getRelationshipColor, type BetRelationship } from '@/types/graph';
+import type { GraphOutcomeResult, GraphOutcomeDelta } from '@/utils/globalsApi';
+
+interface DecisionMiniGraphData {
+  nodes: Array<{
+    id: string;
+    label: string;
+    fullLabel: string;
+    x: number;
+    y: number;
+    imageUrl?: string;
+  }>;
+  links: Array<{
+    source: string;
+    target: string;
+    relationship?: BetRelationship;
+    reasoning?: string;
+  }>;
+  sourceLabel: string;
+  targetLabel: string;
+  reasoning: string;
+  sourceImageUrl?: string;
+}
 
 interface DecisionScreenProps {
   eventTitle: string;
   userSelection: 'yes' | 'no' | null;
   profileImage: string | null;
   onViewNodes: () => void;
-  miniGraphData?: MiniGraphData | null;
-  isLoading?: boolean;
-  error?: string | null;
+  onDecision: (accepted: boolean, risk: number) => void;
+  isProcessing: boolean;
+  miniGraphData?: DecisionMiniGraphData | null;
+  showUserSelection?: boolean;
+  globalsBaseline?: GraphOutcomeResult | null;
+  globalsCandidate?: GraphOutcomeResult | null;
+  globalsDelta?: GraphOutcomeDelta | null;
+  globalsLoading?: boolean;
+  globalsError?: string | null;
 }
 
 // Reusable button styles matching landing page
 const buttonBase = {
-  padding: '8px 14px',
-  borderRadius: '8px',
+  padding: '6px 12px',
+  borderRadius: '7px',
   fontWeight: 500,
-  fontSize: '12px',
+  fontSize: '11px',
   cursor: 'pointer',
   border: '1px solid rgba(255, 255, 255, 0.1)',
   background: 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)',
@@ -34,25 +60,35 @@ export default function DecisionScreen({
   userSelection,
   profileImage,
   onViewNodes,
+  onDecision,
+  isProcessing,
   miniGraphData,
-  isLoading,
-  error,
+  showUserSelection,
+  globalsBaseline,
+  globalsCandidate,
+  globalsDelta,
+  globalsLoading,
+  globalsError,
 }: DecisionScreenProps) {
   const [accepted, setAccepted] = useState<boolean | null>(null);
-  const [selectedStrategy, setSelectedStrategy] = useState<string>('trading');
+  const [riskLevel, setRiskLevel] = useState(50);
   const [viewNodesHover, setViewNodesHover] = useState(false);
   const [acceptBtnHover, setAcceptBtnHover] = useState(false);
   const [rejectBtnHover, setRejectBtnHover] = useState(false);
-  const [strategyHover, setStrategyHover] = useState(false);
+  const [riskHover, setRiskHover] = useState(false);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setAccepted(null);
+  }, [miniGraphData?.targetLabel, miniGraphData?.sourceLabel]);
+
+  useEffect(() => {
     if (!svgRef.current || !miniGraphData) return;
 
-    const width = 340;
-    const height = 110;
+    const width = 320;
+    const height = 90;
 
     // Clear previous render
     d3.select(svgRef.current).selectAll('*').remove();
@@ -67,9 +103,18 @@ export default function DecisionScreen({
 
     // Create copies of data for D3 (no simulation needed - fixed positions)
     const nodes = miniGraphData.nodes.map(d => ({ ...d }));
-    const links = miniGraphData.links.map(d => ({ ...d, source: nodes[0], target: nodes[1] }));
+    const links = miniGraphData.links
+      .map(d => {
+        const source = nodes.find(node => node.id === d.source) ?? nodes[0];
+        const target = nodes.find(node => node.id === d.target) ?? nodes[nodes.length - 1];
+        if (!source || !target) {
+          return null;
+        }
+        return { ...d, source, target };
+      })
+      .filter(Boolean) as Array<any>;
 
-    const nodeRadius = 18;
+    const nodeRadius = 16;
 
     // Add circular clip path for images
     const defs = svg.append('defs');
@@ -158,6 +203,63 @@ export default function DecisionScreen({
     node.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
   }, [miniGraphData]);
 
+  const formatNumber = (value: number, decimals = 2) => {
+    if (!Number.isFinite(value)) {
+      return '—';
+    }
+    return value.toFixed(decimals);
+  };
+
+  const formatSigned = (value: number, formatter: (val: number) => string) => {
+    if (!Number.isFinite(value)) {
+      return '—';
+    }
+    const sign = value > 0 ? '+' : value < 0 ? '-' : '';
+    return `${sign}${formatter(Math.abs(value))}`;
+  };
+
+  const formatPercent = (value: number) => `${(value * 100).toFixed(2)}%`;
+
+  const getDeltaColor = (value: number) => {
+    if (value > 0) {
+      return '#6ee7b7';
+    }
+    if (value < 0) {
+      return '#fca5a5';
+    }
+    return '#94a3b8';
+  };
+
+  const deltaRows = globalsDelta
+    ? [
+        {
+          label: 'Expected Value',
+          value: globalsDelta.expectedValue,
+          display: formatSigned(globalsDelta.expectedValue, formatNumber),
+        },
+        {
+          label: 'Worst Case',
+          value: globalsDelta.worstCase,
+          display: formatSigned(globalsDelta.worstCase, formatNumber),
+        },
+        {
+          label: 'Best Case',
+          value: globalsDelta.bestCase,
+          display: formatSigned(globalsDelta.bestCase, formatNumber),
+        },
+        {
+          label: 'Total Stake',
+          value: globalsDelta.totalStake,
+          display: formatSigned(globalsDelta.totalStake, formatNumber),
+        },
+        {
+          label: 'ROI',
+          value: globalsDelta.roi,
+          display: formatSigned(globalsDelta.roi, formatPercent),
+        },
+      ]
+    : [];
+
   return (
     <div style={{
       width: '420px',
@@ -176,32 +278,32 @@ export default function DecisionScreen({
     }}>
       {/* Header */}
       <div style={{
-        padding: '16px 20px',
+        padding: '12px 16px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         background: 'transparent',
         position: 'relative',
         zIndex: 10,
-        gap: '12px',
+        gap: '8px',
         minWidth: 0, // Allow flex items to shrink
       }}>
         <div style={{ 
           display: 'flex', 
           alignItems: 'center', 
-          gap: '10px',
+          gap: '8px',
           flex: 1,
           minWidth: 0, // Allow title to shrink
         }}>
           <div style={{
-            width: '32px',
-            height: '32px',
+            width: '28px',
+            height: '28px',
             background: profileImage ? 'transparent' : 'linear-gradient(135deg, #475569, #334155)',
             borderRadius: '50%',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '16px',
+            fontSize: '14px',
             flexShrink: 0, // Prevent icon from shrinking
             overflow: 'hidden',
           }}>
@@ -232,7 +334,7 @@ export default function DecisionScreen({
           </div>
           <h1 style={{ 
             margin: 0, 
-            fontSize: '15px', 
+            fontSize: '14px', 
             fontWeight: 600, 
             color: '#f1f5f9',
             overflow: 'hidden',
@@ -269,12 +371,12 @@ export default function DecisionScreen({
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        gap: '12px',
-        padding: '0 20px 16px 20px',
+        gap: '10px',
+        padding: '0 16px 12px 16px',
         position: 'relative',
         zIndex: 10,
       }}>
-        {/* Strategy Selection - Radix UI Select */}
+        {/* Risk Slider */}
         <div>
           <div style={{
             fontSize: '9px',
@@ -283,107 +385,46 @@ export default function DecisionScreen({
             letterSpacing: '0.5px',
             marginBottom: '6px',
             fontWeight: 600,
-          }}>Strategy</div>
-          <Select.Root value={selectedStrategy} onValueChange={setSelectedStrategy}>
-            <Select.Trigger
-              onMouseEnter={() => setStrategyHover(true)}
-              onMouseLeave={() => setStrategyHover(false)}
+          }}>Risk</div>
+          <div
+            onMouseEnter={() => setRiskHover(true)}
+            onMouseLeave={() => setRiskHover(false)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              width: '100%',
+              background: 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)',
+              color: '#e2e8f0',
+              padding: '8px 12px',
+              borderRadius: '8px',
+              border: riskHover ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+              cursor: 'pointer',
+              boxShadow: riskHover
+                ? '0 8px 24px rgba(70, 100, 140, 0.25)'
+                : '0 2px 8px rgba(0, 0, 0, 0.15)',
+              outline: 'none',
+              transition: 'all 0.2s ease',
+              filter: riskHover ? 'brightness(1.2)' : 'brightness(1)',
+            }}
+          >
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={riskLevel}
+              onChange={(e) => setRiskLevel(Number(e.target.value))}
               style={{
-                width: '100%',
-                background: 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)',
-                color: '#e2e8f0',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: strategyHover ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+                flex: 1,
                 cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                fontSize: '12px',
-                fontWeight: 500,
-                boxShadow: strategyHover 
-                  ? '0 8px 32px rgba(70, 100, 140, 0.3)' 
-                  : '0 2px 8px rgba(0, 0, 0, 0.15)',
-                outline: 'none',
-                transition: 'all 0.2s ease',
-                filter: strategyHover ? 'brightness(1.25)' : 'brightness(1)',
+                accentColor: '#38bdf8',
               }}
-            >
-              <Select.Value />
-              <Select.Icon style={{ color: '#64748b', fontSize: '10px' }}>
-                <span>▼</span>
-              </Select.Icon>
-            </Select.Trigger>
-            <Select.Portal>
-              <Select.Content
-                position="popper"
-                sideOffset={4}
-                align="end"
-                style={{
-                  background: 'linear-gradient(180deg, #2a3a4a 0%, #1e293b 100%)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: '8px',
-                  overflow: 'hidden',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
-                  minWidth: '180px',
-                  zIndex: 100,
-                }}
-              >
-                <Select.Viewport>
-                  <Select.Item
-                    value="trading"
-                    style={{
-                      padding: '10px 14px',
-                      fontSize: '12px',
-                      fontWeight: 500,
-                      color: '#e2e8f0',
-                      cursor: 'pointer',
-                      outline: 'none',
-                      background: selectedStrategy === 'trading' ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
-                      transition: 'all 0.2s ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
-                      e.currentTarget.style.filter = 'brightness(1.25)';
-                      e.currentTarget.style.boxShadow = 'inset 0 0 20px rgba(70, 100, 140, 0.15)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = selectedStrategy === 'trading' ? 'rgba(255, 255, 255, 0.05)' : 'transparent';
-                      e.currentTarget.style.filter = 'brightness(1)';
-                      e.currentTarget.style.boxShadow = 'none';
-                    }}
-                  >
-                    <Select.ItemText>Trading</Select.ItemText>
-                  </Select.Item>
-                  <Select.Item
-                    value="hedge"
-                    style={{
-                      padding: '10px 14px',
-                      fontSize: '12px',
-                      fontWeight: 500,
-                      color: '#e2e8f0',
-                      cursor: 'pointer',
-                      outline: 'none',
-                      background: selectedStrategy === 'hedge' ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
-                      transition: 'all 0.2s ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
-                      e.currentTarget.style.filter = 'brightness(1.25)';
-                      e.currentTarget.style.boxShadow = 'inset 0 0 20px rgba(70, 100, 140, 0.15)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = selectedStrategy === 'hedge' ? 'rgba(255, 255, 255, 0.05)' : 'transparent';
-                      e.currentTarget.style.filter = 'brightness(1)';
-                      e.currentTarget.style.boxShadow = 'none';
-                    }}
-                  >
-                    <Select.ItemText>Hedge</Select.ItemText>
-                  </Select.Item>
-                </Select.Viewport>
-              </Select.Content>
-            </Select.Portal>
-          </Select.Root>
+            />
+            <span style={{ fontSize: '11px', fontWeight: 600, minWidth: '32px', textAlign: 'right' }}>
+              {Math.round(riskLevel)}
+            </span>
+          </div>
         </div>
 
         {/* Chain Dependency - Mini Graph (matching VisualizationScreen style) */}
@@ -397,11 +438,11 @@ export default function DecisionScreen({
             fontWeight: 600,
           }}>Chain Dependency</div>
           <div style={{
-            background: 'transparent',
-            borderRadius: '8px',
-            border: '1px solid #334155',
-            padding: '16px',
-          }}>
+          background: 'transparent',
+          borderRadius: '8px',
+          border: '1px solid #334155',
+          padding: '12px',
+        }}>
             {/* Mini graph visualization - D3 controlled with pan/zoom/drag */}
             <div style={{ position: 'relative' }}>
               <svg ref={svgRef} style={{ overflow: 'visible' }}></svg>
@@ -430,15 +471,17 @@ export default function DecisionScreen({
               <>
                 <div style={{
                   display: 'flex',
-                  justifyContent: 'space-between',
-                  marginTop: '12px',
-                  paddingTop: '10px',
+                  justifyContent: miniGraphData.sourceLabel ? 'space-between' : 'center',
+                  marginTop: '8px',
+                  paddingTop: '8px',
                   borderTop: '1px solid rgba(51, 65, 85, 0.3)',
                 }}>
-                  <div style={{ textAlign: 'center', flex: 1 }}>
-                    <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Source</div>
-                    <div style={{ fontSize: '10px', fontWeight: 500, color: '#e2e8f0' }}>{miniGraphData.sourceLabel}</div>
-                  </div>
+                  {miniGraphData.sourceLabel && (
+                    <div style={{ textAlign: 'center', flex: 1 }}>
+                      <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Source</div>
+                      <div style={{ fontSize: '10px', fontWeight: 500, color: '#e2e8f0' }}>{miniGraphData.sourceLabel}</div>
+                    </div>
+                  )}
                   <div style={{ textAlign: 'center', flex: 1 }}>
                     <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Target</div>
                     <div style={{ fontSize: '10px', fontWeight: 500, color: '#e2e8f0' }}>{miniGraphData.targetLabel}</div>
@@ -447,8 +490,8 @@ export default function DecisionScreen({
 
                 {miniGraphData.links[0]?.relationship && (
                   <div style={{
-                    marginTop: '10px',
-                    paddingTop: '10px',
+                    marginTop: '8px',
+                    paddingTop: '8px',
                     borderTop: '1px solid rgba(51, 65, 85, 0.3)',
                   }}>
                     <span style={{
@@ -465,7 +508,7 @@ export default function DecisionScreen({
 
                 {miniGraphData.reasoning && (
                   <div style={{
-                    marginTop: '8px',
+                    marginTop: '6px',
                     fontSize: '10px',
                     color: '#64748b',
                     lineHeight: 1.4,
@@ -475,59 +518,29 @@ export default function DecisionScreen({
                 )}
               </>
             )}
-            {!miniGraphData && isLoading && (
+            {!miniGraphData && (
               <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '20px 0',
-                gap: '8px',
-              }}>
-                <div style={{
-                  width: '20px',
-                  height: '20px',
-                  border: '2px solid #334155',
-                  borderTopColor: '#64748b',
-                  borderRadius: '50%',
-                  animation: 'spin 1s linear infinite',
-                }} />
-                <div style={{
-                  fontSize: '10px',
-                  color: '#64748b',
-                }}>
-                  Finding related markets...
-                </div>
-                <style>{`
-                  @keyframes spin {
-                    to { transform: rotate(360deg); }
-                  }
-                `}</style>
-              </div>
-            )}
-            {!miniGraphData && !isLoading && (
-              <div style={{
-                marginTop: '12px',
-                paddingTop: '10px',
+                marginTop: '8px',
+                paddingTop: '8px',
                 borderTop: '1px solid rgba(51, 65, 85, 0.3)',
                 fontSize: '10px',
                 color: '#64748b',
                 lineHeight: 1.4,
                 textAlign: 'center',
               }}>
-                {error ? `Error: ${error}` : 'No related markets found'}
+                No queued dependencies yet
               </div>
             )}
           </div>
         </div>
 
         {/* User Selection Display */}
-        {userSelection && (
+        {userSelection && (showUserSelection ?? true) && (
           <div style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '8px 0',
+            padding: '6px 0',
             borderBottom: '1px solid #1e293b',
           }}>
             <span style={{ fontSize: '11px', color: '#64748b' }}>Your position</span>
@@ -541,8 +554,8 @@ export default function DecisionScreen({
           </div>
         )}
 
-        {/* System Decision with Reasoning */}
-        <div style={{ marginTop: '16px' }}>
+        {/* Impact Summary */}
+        <div style={{ marginTop: '10px' }}>
           <div style={{
             fontSize: '9px',
             color: '#64748b',
@@ -550,13 +563,13 @@ export default function DecisionScreen({
             letterSpacing: '0.5px',
             marginBottom: '6px',
             fontWeight: 600,
-          }}>Recommendation</div>
+          }}>Accept vs Reject</div>
           <motion.div 
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, ease: 'easeOut' }}
             style={{
-              padding: '14px 16px',
+              padding: '12px 14px',
               background: '#1e293b',
               borderRadius: '8px',
               border: '1px solid rgba(255, 255, 255, 0.12)',
@@ -569,35 +582,96 @@ export default function DecisionScreen({
               color: '#f1f5f9',
               letterSpacing: '0.2px',
               display: 'block',
-              marginBottom: '10px',
-            }}>{miniGraphData ? 'Review Related Market' : 'No Recommendation'}</span>
-            <p style={{ 
-              margin: 0, 
-              fontSize: '11px', 
-              color: '#64748b', 
-              lineHeight: 1.5,
+              marginBottom: '8px',
             }}>
-              {miniGraphData?.reasoning 
-                ? miniGraphData.reasoning 
-                : error 
-                  ? 'Unable to analyze related markets. Please try again.' 
-                  : 'No related markets found for this event.'}
-            </p>
+              {globalsLoading
+                ? 'Calculating impact'
+                : globalsError
+                  ? 'Impact unavailable'
+                  : 'Decision impact'}
+            </span>
+            {globalsLoading && (
+              <p style={{ 
+                margin: 0, 
+                fontSize: '11px', 
+                color: '#64748b', 
+                lineHeight: 1.5,
+              }}>
+                Comparing accept vs reject outcomes...
+              </p>
+            )}
+            {globalsError && !globalsLoading && (
+              <p style={{ 
+                margin: 0, 
+                fontSize: '11px', 
+                color: '#fca5a5', 
+                lineHeight: 1.5,
+              }}>
+                {globalsError}
+              </p>
+            )}
+            {!globalsLoading && !globalsError && globalsDelta && (
+              <>
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  {deltaRows.map((row) => (
+                    <div
+                      key={row.label}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        fontSize: '11px',
+                        color: '#94a3b8',
+                      }}
+                    >
+                      <span>{row.label}</span>
+                      <span style={{ color: getDeltaColor(row.value), fontWeight: 600 }}>
+                        {row.display}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {globalsBaseline && globalsCandidate && (
+                  <div style={{ 
+                    marginTop: '8px', 
+                    paddingTop: '8px', 
+                    borderTop: '1px solid rgba(51, 65, 85, 0.3)',
+                    fontSize: '10px', 
+                    color: '#64748b',
+                    lineHeight: 1.4,
+                  }}>
+                    Accept EV: {formatNumber(globalsCandidate.expectedValue)} | Reject EV: {formatNumber(globalsBaseline.expectedValue)}
+                    <br />
+                    Accept ROI: {formatPercent(globalsCandidate.roi)} | Reject ROI: {formatPercent(globalsBaseline.roi)}
+                  </div>
+                )}
+              </>
+            )}
+            {!globalsLoading && !globalsError && !globalsDelta && (
+              <p style={{ 
+                margin: 0, 
+                fontSize: '11px', 
+                color: '#64748b', 
+                lineHeight: 1.5,
+              }}>
+                No queued dependency to compare yet.
+              </p>
+            )}
           </motion.div>
         </div>
 
         {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: '10px', marginTop: 'auto', paddingTop: '16px' }}>
+        <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '12px' }}>
           <button
             onMouseEnter={() => setAcceptBtnHover(true)}
             onMouseLeave={() => setAcceptBtnHover(false)}
+            disabled={isProcessing}
             style={{
               flex: 1,
-              padding: '10px 16px',
+              padding: '8px 12px',
               borderRadius: '8px',
               fontWeight: 500,
               fontSize: '12px',
-              cursor: 'pointer',
+              cursor: isProcessing ? 'not-allowed' : 'pointer',
               border: accepted === true 
                 ? '1px solid rgba(110, 231, 183, 0.3)' 
                 : acceptBtnHover 
@@ -612,21 +686,26 @@ export default function DecisionScreen({
                 ? '0 8px 32px rgba(70, 100, 140, 0.3)' 
                 : '0 2px 8px rgba(0, 0, 0, 0.15)',
               filter: acceptBtnHover && accepted !== true ? 'brightness(1.25)' : 'brightness(1)',
+              opacity: isProcessing ? 0.6 : 1,
             }}
-            onClick={() => setAccepted(true)}
+            onClick={() => {
+              setAccepted(true);
+              onDecision(true, riskLevel);
+            }}
           >
             Accept
           </button>
           <button
             onMouseEnter={() => setRejectBtnHover(true)}
             onMouseLeave={() => setRejectBtnHover(false)}
+            disabled={isProcessing}
             style={{
               flex: 1,
-              padding: '10px 16px',
+              padding: '8px 12px',
               borderRadius: '8px',
               fontWeight: 500,
               fontSize: '12px',
-              cursor: 'pointer',
+              cursor: isProcessing ? 'not-allowed' : 'pointer',
               border: accepted === false 
                 ? '1px solid rgba(252, 165, 165, 0.3)' 
                 : rejectBtnHover 
@@ -641,8 +720,12 @@ export default function DecisionScreen({
                 ? '0 8px 32px rgba(70, 100, 140, 0.3)' 
                 : '0 2px 8px rgba(0, 0, 0, 0.15)',
               filter: rejectBtnHover && accepted !== false ? 'brightness(1.25)' : 'brightness(1)',
+              opacity: isProcessing ? 0.6 : 1,
             }}
-            onClick={() => setAccepted(false)}
+            onClick={() => {
+              setAccepted(false);
+              onDecision(false, riskLevel);
+            }}
           >
             Reject
           </button>

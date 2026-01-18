@@ -1,12 +1,13 @@
-import { GraphData, Node } from '@/types/graph';
+import type { RelationGraphNode } from '@/types/relationGraph';
+import { addChildNode, flattenGraph } from '@/utils/relationGraph';
 
 interface AddNodesScreenProps {
-  graphData: GraphData;
-  onGraphUpdate: (newGraphData: GraphData) => void;
+  relationGraph: RelationGraphNode;
+  onGraphUpdate: (newGraph: RelationGraphNode) => void;
   marketImageUrl: string | null;
 }
 
-function AddNodesScreen({ graphData, onGraphUpdate, marketImageUrl }: AddNodesScreenProps) {
+function AddNodesScreen({ relationGraph, onGraphUpdate, marketImageUrl }: AddNodesScreenProps) {
   const generateRandomLabel = () => {
     const adjectives = ['Quick', 'Lazy', 'Happy', 'Sad', 'Brave', 'Smart', 'Wild', 'Calm', 'Bold', 'Swift'];
     const nouns = ['Fox', 'Dog', 'Cat', 'Bear', 'Wolf', 'Eagle', 'Tiger', 'Lion', 'Hawk', 'Owl'];
@@ -16,28 +17,31 @@ function AddNodesScreen({ graphData, onGraphUpdate, marketImageUrl }: AddNodesSc
   };
 
   const addRandomNode = () => {
-    const newNode: Node = {
+    const allNodes = flattenGraph(relationGraph);
+    const parent = allNodes[Math.floor(Math.random() * allNodes.length)] ?? relationGraph;
+    const newNode: RelationGraphNode = {
       id: `node-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       label: generateRandomLabel(),
       imageUrl: marketImageUrl || undefined,
+      probability: 0.5,
+      weight: 1,
+      decision: 'yes',
+      relation: 'WEAK_SIGNAL',
+      children: [],
     };
 
-    // Pick a random existing node to link to
-    const randomExistingNode = graphData.nodes[Math.floor(Math.random() * graphData.nodes.length)];
-
-    const newGraphData: GraphData = {
-      nodes: [...graphData.nodes, newNode],
-      links: [...graphData.links, { source: randomExistingNode.id, target: newNode.id }],
-    };
-
-    onGraphUpdate(newGraphData);
+    const nextGraph = addChildNode(relationGraph, parent.id, newNode);
+    onGraphUpdate(nextGraph);
   };
+
+  const allNodes = flattenGraph(relationGraph);
+  const linkCount = allNodes.reduce((sum, node) => sum + (node.children?.length ?? 0), 0);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div>
-        <p>Total nodes: {graphData.nodes.length}</p>
-        <p>Total links: {graphData.links.length}</p>
+        <p>Total nodes: {allNodes.length}</p>
+        <p>Total links: {linkCount}</p>
       </div>
       
       <button 
@@ -58,7 +62,7 @@ function AddNodesScreen({ graphData, onGraphUpdate, marketImageUrl }: AddNodesSc
       <div style={{ maxHeight: '300px', overflow: 'auto' }}>
         <h3>Nodes:</h3>
         <ul style={{ listStyle: 'none', padding: 0 }}>
-          {graphData.nodes.map((node) => (
+          {allNodes.map((node) => (
             <li key={node.id} style={{ padding: '5px 0' }}>
               {node.label} <span style={{ color: '#666', fontSize: '12px' }}>({node.id})</span>
             </li>

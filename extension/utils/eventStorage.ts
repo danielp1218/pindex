@@ -9,10 +9,35 @@ export interface EventState {
   [key: string]: any;
 }
 
+export interface DependencyQueueItem {
+  id: string;
+  url: string;
+  weight: number;
+  decision: 'yes' | 'no';
+  relation: string;
+  imageUrl?: string;
+  parentId?: string;
+  parentUrl?: string;
+  sourceId?: string;
+  sourceSlug?: string;
+  sourceUrl?: string;
+  sourceQuestion?: string;
+  explanation?: string;
+  question?: string;
+  probability?: number;
+  yesPercentage?: number;
+  noPercentage?: number;
+}
+
+export interface DependencyQueueState {
+  queue: DependencyQueueItem[];
+  visited: string[];
+}
+
 /**
  * Extract event ID from a polymarket event URL
  */
-function getEventIdFromUrl(url: string): string | null {
+export function getEventIdFromUrl(url: string): string | null {
   const match = url.match(/\/event\/([^/?]+)/);
   return match ? match[1] : null;
 }
@@ -23,6 +48,16 @@ function getEventIdFromUrl(url: string): string | null {
 export async function saveEventState(eventId: string, state: EventState): Promise<void> {
   const key = `${STORAGE_PREFIX}${eventId}`;
   await browser.storage.local.set({ [key]: state });
+}
+
+/**
+ * Update state for a specific event (merge with existing state)
+ */
+export async function updateEventState(eventId: string, state: EventState): Promise<void> {
+  const key = `${STORAGE_PREFIX}${eventId}`;
+  const existing = await getEventState(eventId);
+  const nextState = { ...(existing || {}), ...state };
+  await browser.storage.local.set({ [key]: nextState });
 }
 
 /**
@@ -42,7 +77,18 @@ export async function saveCurrentPageState(url: string, state: EventState): Prom
   if (!eventId) {
     throw new Error('Not a valid event page URL');
   }
-  await saveEventState(eventId, state);
+  await updateEventState(eventId, state);
+}
+
+/**
+ * Update state for the current page (merge with existing state)
+ */
+export async function updateCurrentPageState(url: string, state: EventState): Promise<void> {
+  const eventId = getEventIdFromUrl(url);
+  if (!eventId) {
+    throw new Error('Not a valid event page URL');
+  }
+  await updateEventState(eventId, state);
 }
 
 /**
@@ -54,6 +100,31 @@ export async function getCurrentPageState(url: string): Promise<EventState | nul
     return null;
   }
   return getEventState(eventId);
+}
+
+/**
+ * Get dependency queue + visited list for a specific event URL
+ */
+export async function getDependencyState(url: string): Promise<DependencyQueueState> {
+  const state = await getCurrentPageState(url);
+  const queue = Array.isArray(state?.dependencyQueue) ? state?.dependencyQueue : [];
+  const visited = Array.isArray(state?.visitedUrls) ? state?.visitedUrls : [];
+
+  return { queue, visited };
+}
+
+/**
+ * Persist dependency queue + visited list for a specific event URL
+ */
+export async function setDependencyState(
+  url: string,
+  queue: DependencyQueueItem[],
+  visited: string[]
+): Promise<void> {
+  await updateCurrentPageState(url, {
+    dependencyQueue: queue,
+    visitedUrls: visited,
+  });
 }
 
 /**
