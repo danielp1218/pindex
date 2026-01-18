@@ -3,8 +3,19 @@
   "name": "server",
   "main": "src/index.ts",
   "compatibility_date": "2026-01-18",
+  
   "compatibility_flags": [
     "nodejs_compat"
+  ],
+  "ratelimits": [
+    {
+      "name": "MY_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": {
+        "limit": 2,
+        "period": 10
+      }
+    }
   ],
   // "vars": {
   //   "MY_VAR": "my-variable"
@@ -31,8 +42,8 @@
   // "ai": {
   //   "binding": "AI"
   // },
-  // "observability": {
-  //   "enabled": true,
-  //   "head_sampling_rate": 1
-  // }
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
 }

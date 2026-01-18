@@ -10,6 +10,7 @@ import { dependenciesRouter } from './routes/dependencies';
 type Bindings = {
   PHOENIX_ENDPOINT?: string;
   OPENAI_API_KEY: string;
+  MY_RATE_LIMITER: RateLimit;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
