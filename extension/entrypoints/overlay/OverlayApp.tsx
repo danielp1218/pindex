@@ -491,7 +491,11 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
           fontWeight: 600,
         }}>Strategy</div>
         <button
-          onClick={() => setStrategyOpen(!strategyOpen)}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            setStrategyOpen(prev => !prev);
+          }}
           onMouseEnter={() => setStrategyHover(true)}
           onMouseLeave={() => setStrategyHover(false)}
           style={{
