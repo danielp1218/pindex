@@ -244,6 +244,64 @@
             <div id="searchResponse" class="response empty">No response yet</div>
         </div>
 
+        <!-- Relations Analyzer -->
+        <div class="section">
+            <h2>Relations Analyzer</h2>
+
+            <div class="controls">
+                <textarea id="relationsPayload" placeholder="JSON payload for /api/relations/price" style="min-height: 400px;">{
+  "root": {
+    "id": "trump-wins-nomination",
+    "probability": 0.65,
+    "weight": 1.0,
+    "decision": "yes"
+  },
+  "dependants": [
+    {
+      "id": "trump-wins-iowa",
+      "probability": 0.75,
+      "relation": "SUBEVENT"
+    },
+    {
+      "id": "biden-wins-nomination",
+      "probability": 0.42,
+      "relation": "CONTRADICTS"
+    },
+    {
+      "id": "trump-wins-general",
+      "probability": 0.48,
+      "relation": "IMPLIES"
+    },
+    {
+      "id": "desantis-wins-nomination",
+      "probability": 0.18,
+      "relation": "CONTRADICTS"
+    },
+    {
+      "id": "haley-wins-nomination",
+      "probability": 0.12,
+      "relation": "CONTRADICTS"
+    },
+    {
+      "id": "other-gop-nominee",
+      "probability": 0.05,
+      "relation": "CONTRADICTS"
+    }
+  ],
+  "volatility": 1.2,
+  "options": {
+    "epsilon": 0.01
+  }
+}</textarea>
+            </div>
+            <div class="controls">
+                <button onclick="priceRelations()">POST /api/relations/price</button>
+                <button onclick="loadSimpleExample()">Load Simple Example</button>
+                <button onclick="loadArbitrageExample()">Load Arbitrage Example</button>
+            </div>
+            <div id="relationsResponse" class="response empty">No response yet</div>
+        </div>
+
         <!-- SSE Events -->
         <div class="section">
             <h2>Server-Sent Events (SSE)</h2>
@@ -385,6 +443,96 @@
                 displayResponse('searchResponse', data, !response.ok);
             } catch (error) {
                 displayResponse('searchResponse', { error: error.message }, true);
+            }
+        }
+
+        function loadSimpleExample() {
+            document.getElementById('relationsPayload').value = JSON.stringify({
+                "root": {
+                    "id": "event-main",
+                    "probability": 0.60,
+                    "weight": 1.0,
+                    "decision": "yes"
+                },
+                "dependants": [
+                    {
+                        "id": "event-a-implies",
+                        "probability": 0.40,
+                        "relation": "IMPLIES"
+                    },
+                    {
+                        "id": "event-b-contradicts",
+                        "probability": 0.35,
+                        "relation": "CONTRADICTS"
+                    }
+                ],
+                "volatility": 1.0,
+                "options": {
+                    "epsilon": 0.01
+                }
+            }, null, 2);
+        }
+
+        function loadArbitrageExample() {
+            document.getElementById('relationsPayload').value = JSON.stringify({
+                "root": {
+                    "id": "election-outcome",
+                    "probability": 1.0,
+                    "weight": 2.0,
+                    "decision": "yes"
+                },
+                "dependants": [
+                    {
+                        "id": "candidate-a",
+                        "probability": 0.30,
+                        "relation": "PARTITION_OF"
+                    },
+                    {
+                        "id": "candidate-b",
+                        "probability": 0.25,
+                        "relation": "PARTITION_OF"
+                    },
+                    {
+                        "id": "candidate-c",
+                        "probability": 0.20,
+                        "relation": "PARTITION_OF"
+                    },
+                    {
+                        "id": "candidate-d",
+                        "probability": 0.15,
+                        "relation": "PARTITION_OF"
+                    }
+                ],
+                "volatility": 0.8,
+                "options": {
+                    "epsilon": 0.02
+                }
+            }, null, 2);
+        }
+
+        async function priceRelations() {
+            const payloadText = document.getElementById('relationsPayload').value;
+            let payload;
+
+            try {
+                payload = JSON.parse(payloadText);
+            } catch (error) {
+                displayResponse('relationsResponse', { error: 'Invalid JSON payload' }, true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/relations/price`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                displayResponse('relationsResponse', data, !response.ok);
+            } catch (error) {
+                displayResponse('relationsResponse', { error: error.message }, true);
             }
         }
 

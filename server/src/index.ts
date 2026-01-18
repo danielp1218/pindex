@@ -8,7 +8,8 @@ import { healthRouter } from './routes/health';
 import { sseRouter } from './routes/sse';
 import { dependenciesRouter } from './routes/dependencies';
 import { polymarketRouter } from './routes/polymarket';
-import { relatedBetsRouter } from './routes/related-bets';
+import { relationsRouter } from './routes/relations';
+import { toolsRouter } from './routes/tools';
 
 // Setup tracing
 setupTracing();
@@ -28,7 +29,9 @@ app.get('/', (c) => {
       events: '/events (SSE)',
       dependencies: '/api/dependencies',
       polymarket: '/api/polymarket',
-      relatedBets: '/api/related-bets',
+      relations: '/api/relations',
+      relationsPricing: '/api/relations/price',
+      tools: '/tools',
     },
   });
 });
@@ -37,7 +40,8 @@ app.route('/health', healthRouter);
 app.route('/events', sseRouter);
 app.route('/api/dependencies', dependenciesRouter);
 app.route('/api/polymarket', polymarketRouter);
-app.route('/api/related-bets', relatedBetsRouter);
+app.route('/api/relations', relationsRouter);
+app.route('/tools', toolsRouter);
 
 const port = Number(process.env.PORT) || 8000;
 

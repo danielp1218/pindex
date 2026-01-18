@@ -5,13 +5,19 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "build:packages": "cd packages/relations-engine && npm i && npm run build",
+    "build:all": "npm run build:packages && npm run build",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:watch": "vitest --watch"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.2",
+    "@polyindex/relations-engine": "file:packages/relations-engine",
+    "dotenv": "^16.4.7",
     "hono": "^4.11.4",
-    "openai": "^4.78.1",
-    "dotenv": "^16.4.7"
+    "openai": "^4.78.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
