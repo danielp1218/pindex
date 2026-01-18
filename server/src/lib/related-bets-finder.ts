@@ -411,7 +411,6 @@ export async function* findRelatedBets(
   const MAX_RESULTS = Math.max(1, Math.floor(requestedMax)); // Maximum number of related bets to return
   const MIN_RESULTS = Math.max(0, Math.min(MAX_RESULTS, Math.floor(requestedMin))); // Minimum target
   let foundCount = 0;
-  const SEARCH_CONCURRENCY = 3;
   const EVENT_MARKETS_CONCURRENCY = 4;
   const LLM_BATCH_CONCURRENCY = 2;
 
@@ -664,6 +663,9 @@ Description: ${m.description?.substring(0, 150)}...`;
         }
 
         const marketId = market.conditionId || market.condition_id || market.id;
+        const eventSlug =
+          (market as any)._eventSlug || market.event_slug || (market as any).eventSlug;
+        const marketSlug = market.market_slug || (market as any).slug;
         const relationship = validRelationships.includes(bet.relationship)
           ? bet.relationship
           : 'WEAK_SIGNAL';
@@ -674,7 +676,8 @@ Description: ${m.description?.substring(0, 150)}...`;
           market: {
             id: marketId,
             condition_id: market.condition_id || marketId,
-            market_slug: market.market_slug,
+            market_slug: marketSlug,
+            event_slug: market.event_slug ?? (market as any).eventSlug ?? eventSlug,
             question: market.question,
             description: market.description,
             outcomes: getOutcomes(market),
@@ -682,7 +685,7 @@ Description: ${m.description?.substring(0, 150)}...`;
             volume: market.volume,
             liquidity: market.liquidity,
           },
-          eventSlug: (market as any)._eventSlug,
+          eventSlug,
           relationship: relationship as BetRelationship,
           reasoning: bet.reasoning || 'Related market',
           yesPercentage: percentages.yes,
