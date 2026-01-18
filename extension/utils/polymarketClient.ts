@@ -7,12 +7,40 @@ export interface PolymarketEventInfo {
   title: string;
   question: string;
   url: string;
+  imageUrl?: string;
 }
+
+const eventInfoCache = new Map<string, Omit<PolymarketEventInfo, 'url'>>();
 
 function titleFromSlug(slug: string): string {
   return slug
     .replace(/-/g, ' ')
     .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function isValidImageUrl(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.startsWith('http');
+}
+
+function pickEventImage(event: any): string | undefined {
+  const candidates = [
+    event?.image,
+    event?.imageUrl,
+    event?.image_url,
+    event?.icon,
+    event?.iconUrl,
+    event?.icon_url,
+    event?.bannerImage,
+    event?.banner_image,
+    event?.markets?.[0]?.image,
+    event?.markets?.[0]?.imageUrl,
+    event?.markets?.[0]?.image_url,
+    event?.markets?.[0]?.icon,
+    event?.markets?.[0]?.iconUrl,
+    event?.markets?.[0]?.icon_url,
+  ];
+
+  return candidates.find(isValidImageUrl);
 }
 
 export async function fetchEventInfoFromUrl(url: string): Promise<PolymarketEventInfo | null> {
@@ -21,17 +49,28 @@ export async function fetchEventInfoFromUrl(url: string): Promise<PolymarketEven
     return null;
   }
 
+  const cached = eventInfoCache.get(slug);
+  if (cached) {
+    return { ...cached, url };
+  }
+
   const fallbackTitle = titleFromSlug(slug) || 'Market';
 
   try {
     const response = await fetch(`${GAMMA_API}/events?slug=${encodeURIComponent(slug)}`);
     if (!response.ok) {
-      return {
+      const fallback = {
         slug,
         title: fallbackTitle,
         question: fallbackTitle,
         url,
       };
+      eventInfoCache.set(slug, {
+        slug: fallback.slug,
+        title: fallback.title,
+        question: fallback.question,
+      });
+      return fallback;
     }
 
     const events = await response.json();
@@ -41,19 +80,34 @@ export async function fetchEventInfoFromUrl(url: string): Promise<PolymarketEven
       event?.title ||
       event?.question ||
       fallbackTitle;
+    const imageUrl = pickEventImage(event);
 
-    return {
+    const info = {
       slug,
       title: question,
       question,
       url,
+      imageUrl,
     };
+    eventInfoCache.set(slug, {
+      slug: info.slug,
+      title: info.title,
+      question: info.question,
+      imageUrl: info.imageUrl,
+    });
+    return info;
   } catch (error) {
-    return {
+    const fallback = {
       slug,
       title: fallbackTitle,
       question: fallbackTitle,
       url,
     };
+    eventInfoCache.set(slug, {
+      slug: fallback.slug,
+      title: fallback.title,
+      question: fallback.question,
+    });
+    return fallback;
   }
 }

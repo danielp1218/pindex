@@ -15,6 +15,7 @@ export interface DependencyQueueItem {
   weight: number;
   decision: 'yes' | 'no';
   relation: string;
+  imageUrl?: string;
   parentId?: string;
   parentUrl?: string;
   sourceId?: string;

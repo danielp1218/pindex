@@ -253,6 +253,7 @@ export function buildNodeFromQueueItem(item: DependencyQueueItem): RelationGraph
     question: item.question,
     explanation: item.explanation,
     url: item.url,
+    imageUrl: item.imageUrl,
     probability: clampProbability(probability),
     weight: normalizeWeight(item.weight),
     decision: normalizeDecision(item.decision),
@@ -329,6 +330,34 @@ export function flattenGraph(root: RelationGraphNode): RelationGraphNode[] {
   return nodes;
 }
 
+export function updateNodeImage(
+  graph: RelationGraphNode,
+  nodeId: string,
+  imageUrl: string
+): RelationGraphNode {
+  if (graph.id === nodeId) {
+    if (graph.imageUrl === imageUrl) {
+      return graph;
+    }
+    return { ...graph, imageUrl };
+  }
+
+  if (!graph.children || graph.children.length === 0) {
+    return graph;
+  }
+
+  let updated = false;
+  const nextChildren = graph.children.map(child => {
+    const next = updateNodeImage(child, nodeId, imageUrl);
+    if (next !== child) {
+      updated = true;
+    }
+    return next;
+  });
+
+  return updated ? { ...graph, children: nextChildren } : graph;
+}
+
 export function graphToGraphData(root: RelationGraphNode): GraphData {
   const nodes: Node[] = [];
   const links: Link[] = [];
@@ -345,7 +374,12 @@ export function graphToGraphData(root: RelationGraphNode): GraphData {
     }
 
     for (const child of node.children ?? []) {
-      links.push({ source: node.id, target: child.id });
+      links.push({
+        source: node.id,
+        target: child.id,
+        relationship: child.relation,
+        reasoning: child.explanation,
+      });
       walk(child);
     }
   };

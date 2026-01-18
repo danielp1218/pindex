@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDownIcon, ChevronUpIcon } from '@radix-ui/react-icons';
 import 'tailwindcss';
 
 interface PolyIndexOverlayProps {
@@ -10,30 +9,12 @@ interface PolyIndexOverlayProps {
 
 export default function PolyIndexOverlay({ eventSlug, userSelection }: PolyIndexOverlayProps) {
   const [accepted, setAccepted] = useState<boolean | null>(null);
-  const [strategyOpen, setStrategyOpen] = useState(false);
-  const [selectedStrategy, setSelectedStrategy] = useState<'hedge' | 'trading'>('trading');
+  const [riskLevel, setRiskLevel] = useState(0.5);
   const [nodesExpanded, setNodesExpanded] = useState(false);
   const [showReasoning, setShowReasoning] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
 
-  const strategyRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
-
-  // Click outside handler for strategy dropdown
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (strategyRef.current && !strategyRef.current.contains(event.target as Node)) {
-        setStrategyOpen(false);
-      }
-    }
-
-    if (strategyOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [strategyOpen]);
 
   // Default title
   const eventTitle = 'Market Decision';
@@ -45,12 +26,12 @@ export default function PolyIndexOverlay({ eventSlug, userSelection }: PolyIndex
       style={{ width: '420px', maxHeight: '90vh' }}
     >
       {/* Header with minimize button */}
-      <div className="p-5 border-b border-slate-700/30 bg-[#1a2438]/50 flex items-center justify-between">
+      <div className="p-4 border-b border-slate-700/30 bg-[#1a2438]/50 flex items-center justify-between">
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className="w-9 h-9 bg-gradient-to-br from-slate-600 to-slate-700 rounded-full flex items-center justify-center text-white text-xl border border-slate-500/30 flex-shrink-0">
+          <div className="w-8 h-8 bg-gradient-to-br from-slate-600 to-slate-700 rounded-full flex items-center justify-center text-white text-lg border border-slate-500/30 flex-shrink-0">
             📊
           </div>
-          <h2 className="text-slate-100 text-[16px] font-semibold leading-tight truncate tracking-tight">
+          <h2 className="text-slate-100 text-[14px] font-semibold leading-tight truncate tracking-tight">
             {eventTitle}
           </h2>
         </div>
@@ -63,80 +44,34 @@ export default function PolyIndexOverlay({ eventSlug, userSelection }: PolyIndex
       </div>
 
       {!isMinimized && (
-        <div className="p-5 flex flex-col gap-4 overflow-y-auto" style={{ maxHeight: 'calc(90vh - 80px)' }}>
-          {/* 1. Strategy Selection */}
-          <div ref={strategyRef} className="flex flex-col gap-2">
-            <motion.button
-              whileHover={{ backgroundColor: '#1e293b' }}
-              whileTap={{ scale: 0.99 }}
-              onClick={() => setStrategyOpen(!strategyOpen)}
-              className="w-full bg-[#1a2438] text-slate-200 py-3 px-4 rounded-xl text-sm font-medium transition-all flex items-center justify-between border border-slate-700/50"
-            >
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-md border border-blue-500/30 uppercase tracking-wide font-semibold">
-                  Agent
-                </span>
-                <span className="capitalize text-[13px]">{selectedStrategy} Strategy</span>
+        <div className="p-4 flex flex-col gap-3 overflow-y-auto" style={{ maxHeight: 'calc(90vh - 70px)' }}>
+          {/* 1. Risk */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Risk</span>
+              <span className="text-[11px] text-slate-200 font-semibold">{riskLevel.toFixed(2)}</span>
+            </div>
+            <div className="bg-[#1a2438] border border-slate-700/50 rounded-xl px-3 py-2">
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={riskLevel}
+                onChange={(e) => setRiskLevel(Number(e.target.value))}
+                className="w-full accent-sky-400"
+              />
+              <div className="flex justify-between text-[9px] text-slate-500 mt-1">
+                <span>0</span>
+                <span>1</span>
               </div>
-              <motion.div animate={{ rotate: strategyOpen ? 180 : 0 }} transition={{ duration: 0.2 }}>
-                <ChevronDownIcon className="text-slate-400" />
-              </motion.div>
-            </motion.button>
-
-            <AnimatePresence>
-              {strategyOpen && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="bg-[#1a2438] rounded-xl border border-slate-700/50 overflow-hidden shadow-lg mt-1"
-                >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedStrategy('hedge');
-                      setStrategyOpen(false);
-                    }}
-                    className={`w-full p-4 text-left transition-colors border-b border-slate-700/30 bg-[#1a2438] hover:bg-[#243044] ${
-                      selectedStrategy === 'hedge' ? 'bg-[#243044]' : ''
-                    }`}
-                  >
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-xs font-semibold text-slate-200 uppercase tracking-wide">Hedge</span>
-                      <span className="text-[9px] text-orange-400 font-semibold uppercase border border-orange-400/30 px-1.5 py-0.5 rounded">
-                        Safety
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 leading-tight">Minimize losses by betting against current position.</p>
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedStrategy('trading');
-                      setStrategyOpen(false);
-                    }}
-                    className={`w-full p-4 text-left transition-colors bg-[#1a2438] hover:bg-[#243044] ${
-                      selectedStrategy === 'trading' ? 'bg-[#243044]' : ''
-                    }`}
-                  >
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-xs font-semibold text-slate-200 uppercase tracking-wide">Trading</span>
-                      <span className="text-[9px] text-emerald-400 font-semibold uppercase border border-emerald-400/30 px-1.5 py-0.5 rounded">
-                        Alpha
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 leading-tight">Capitalize on market inefficiencies to increase EV.</p>
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            </div>
           </div>
 
           {/* 2. Chain Dependency */}
           <div
             onClick={() => setNodesExpanded(!nodesExpanded)}
-            className="bg-[#1a2438] rounded-xl border border-slate-700/50 p-4 cursor-pointer hover:bg-[#1e293b] transition-colors"
+            className="bg-[#1a2438] rounded-xl border border-slate-700/50 p-3 cursor-pointer hover:bg-[#1e293b] transition-colors"
           >
             <div className="flex items-center justify-between mb-3">
               <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Chain Dependency</span>
@@ -246,7 +181,7 @@ export default function PolyIndexOverlay({ eventSlug, userSelection }: PolyIndex
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => setAccepted(true)}
-              className={`flex-1 py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all border backdrop-blur-md shadow-lg ${
+              className={`flex-1 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all border backdrop-blur-md shadow-lg ${
                 accepted === true
                   ? 'bg-gradient-to-b from-emerald-500 to-emerald-700 text-white border-emerald-400/50 shadow-emerald-500/20'
                   : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
@@ -258,7 +193,7 @@ export default function PolyIndexOverlay({ eventSlug, userSelection }: PolyIndex
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => setAccepted(false)}
-              className={`flex-1 py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all border backdrop-blur-md shadow-lg ${
+              className={`flex-1 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all border backdrop-blur-md shadow-lg ${
                 accepted === false
                   ? 'bg-gradient-to-b from-red-500 to-red-700 text-white border-red-400/50 shadow-red-500/20'
                   : 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'
@@ -271,11 +206,10 @@ export default function PolyIndexOverlay({ eventSlug, userSelection }: PolyIndex
       )}
 
       {/* Footer */}
-      <div className="mt-auto bg-[#0f172a] py-3 px-5 flex justify-between items-center border-t border-slate-700/30">
+      <div className="mt-auto bg-[#0f172a] py-2 px-4 flex justify-between items-center border-t border-slate-700/30">
         <span className="text-[9px] text-slate-600 uppercase tracking-wider font-medium">PolyIndex</span>
         <img src={chrome?.runtime?.getURL('logo.jpg') || '/logo.jpg'} alt="PolyIndex Logo" className="h-5 w-auto opacity-80" />
       </div>
     </div>
   );
 }
-

@@ -1,3 +1,5 @@
+import { processDependencyDecision } from '@/utils/dependencyQueue';
+
 export default defineBackground(() => {
   // Handle messages from content scripts and popup
   browser.runtime.onMessage.addListener(async (message, sender) => {
@@ -21,6 +23,23 @@ export default defineBackground(() => {
         }
       } else {
         await browser.action.openPopup();
+      }
+      return;
+    }
+
+    if (message.action === 'processDependencyDecision') {
+      const payload = message.payload ?? {};
+      try {
+        const result = await processDependencyDecision({
+          eventUrl: payload.eventUrl,
+          keep: Boolean(payload.keep),
+          fallbackDecision: payload.fallbackDecision,
+          fallbackWeight: payload.fallbackWeight,
+        });
+        return { ok: true, result };
+      } catch (error) {
+        const messageText = (error as Error).message || 'Failed to process dependency decision.';
+        return { ok: false, error: messageText };
       }
     }
   });

@@ -5,6 +5,12 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
     permissions: ['storage'],
+    host_permissions: [
+      'https://*.workers.dev/*',
+      'https://gamma-api.polymarket.com/*',
+      'http://localhost/*',
+      'http://127.0.0.1/*',
+    ],
     // Remove default_popup to allow onClicked to fire
     action: {
       default_icon: {

@@ -50,24 +50,34 @@ function mapDependantsToQueue(
   return dependants
     .filter(dep => typeof dep?.url === 'string' && dep.url.length > 0)
     .filter(dep => !visited.includes(dep.url))
-    .map(dep => ({
-      id: String(dep.id ?? dep.url),
-      url: dep.url,
-      weight: typeof dep.weight === 'number' ? dep.weight : 0,
-      decision: dep.decision === 'no' ? 'no' : 'yes',
-      relation: String(dep.relation ?? ''),
-      parentId: options.parentId,
-      parentUrl: options.parentUrl,
-      sourceId,
-      sourceSlug,
-      sourceUrl,
-      sourceQuestion,
-      explanation: dep.explanation,
-      question: dep.question,
-      probability: typeof dep.probability === 'number' ? dep.probability : undefined,
-      yesPercentage: typeof dep.yesPercentage === 'number' ? dep.yesPercentage : undefined,
-      noPercentage: typeof dep.noPercentage === 'number' ? dep.noPercentage : undefined,
-    }));
+    .map(dep => {
+      const imageUrl =
+        typeof dep.imageUrl === 'string'
+          ? dep.imageUrl
+          : typeof dep.image === 'string'
+            ? dep.image
+            : undefined;
+
+      return {
+        id: String(dep.id ?? dep.url),
+        url: dep.url,
+        weight: typeof dep.weight === 'number' ? dep.weight : 0,
+        decision: dep.decision === 'no' ? 'no' : 'yes',
+        relation: String(dep.relation ?? ''),
+        imageUrl,
+        parentId: options.parentId,
+        parentUrl: options.parentUrl,
+        sourceId,
+        sourceSlug,
+        sourceUrl,
+        sourceQuestion,
+        explanation: dep.explanation,
+        question: dep.question,
+        probability: typeof dep.probability === 'number' ? dep.probability : undefined,
+        yesPercentage: typeof dep.yesPercentage === 'number' ? dep.yesPercentage : undefined,
+        noPercentage: typeof dep.noPercentage === 'number' ? dep.noPercentage : undefined,
+      };
+    });
 }
 
 export async function processDependencyDecision({
