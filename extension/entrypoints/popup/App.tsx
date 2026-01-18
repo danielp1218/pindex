@@ -25,8 +25,10 @@ import { fetchEventInfoFromUrl, type PolymarketEventInfo } from '@/utils/polymar
 import DecisionScreen from './DecisionScreen.tsx';
 import AddNodesScreen from './AddNodesScreen.tsx';
 import VisualizationScreen from './VisualizationScreen.tsx';
+import IntroScreen from './IntroScreen.tsx';
+import { VideoLoader } from '../overlay/VideoLoader';
 
-type Screen = 'decision' | 'add' | 'visualize';
+type Screen = 'intro' | 'decision' | 'add' | 'visualize';
 
 function findNodeById(node: RelationGraphNode, id: string): RelationGraphNode | null {
   if (node.id === id) {
@@ -44,7 +46,8 @@ function findNodeById(node: RelationGraphNode, id: string): RelationGraphNode | 
 function App() {
   const [pageUrl, setPageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [currentScreen, setCurrentScreen] = useState<Screen>('decision');
+  const [hasStarted, setHasStarted] = useState(false);
+  const [currentScreen, setCurrentScreen] = useState<Screen>('intro');
   const [userSelection, setUserSelection] = useState<'yes' | 'no' | null>(null);
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [marketImageUrl, setMarketImageUrl] = useState<string | null>(null);
@@ -192,11 +195,19 @@ function App() {
         const isEventPage = tab.url.includes('polymarket.com/event/');
         console.log('Is event page:', isEventPage);
         if (isEventPage) {
-          setPageUrl(tab.url);
+          // Only set pageUrl if not already set (to avoid re-initialization)
+          if (!pageUrl) {
+            setPageUrl(tab.url);
+          }
 
           // Extract event title from URL for root node
           const slug = tab.url.split('/event/')[1]?.split('?')[0] || '';
           const eventTitle = slug.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Market';
+
+          // Always start with intro screen - don't load hasStarted from storage
+          // The intro screen is shown every time the popup opens
+          setHasStarted(false);
+          setCurrentScreen('intro');
 
           let currentMarketImageUrl: string | null = null;
           let selection: 'yes' | 'no' | null = userSelection;
@@ -223,24 +234,32 @@ function App() {
             console.error('Error getting page info:', error);
           }
 
-          try {
-            const graph = await loadRelationGraph({
-              url: tab.url,
-              title: eventTitle,
-              imageUrl: currentMarketImageUrl || undefined,
-              decision: selection ?? undefined,
-            });
-            setRelationGraph(graph);
-          } catch (error) {
-            console.error('Error loading relation graph:', error);
-            const graph = createRootGraph({
-              url: tab.url,
-              title: eventTitle,
-              imageUrl: currentMarketImageUrl || undefined,
-              decision: selection ?? undefined,
-            });
-            setRelationGraph(graph);
-            await saveRelationGraph(tab.url, graph);
+          // Only load graph and do heavy API calls if user has started
+          if (hasStarted) {
+            try {
+              // Try to load existing graph first
+              const graph = await loadRelationGraph({
+                url: tab.url,
+                title: eventTitle,
+                imageUrl: currentMarketImageUrl || undefined,
+                decision: selection ?? undefined,
+              });
+              setRelationGraph(graph);
+            } catch (error) {
+              console.error('Error loading relation graph:', error);
+              // Create fresh graph for new analysis
+              const graph = createRootGraph({
+                url: tab.url,
+                title: eventTitle,
+                imageUrl: currentMarketImageUrl || undefined,
+                decision: selection ?? undefined,
+              });
+              setRelationGraph(graph);
+              await saveRelationGraph(tab.url, graph);
+            }
+          } else {
+            // If not started, just set loading to false to show intro screen
+            setLoading(false);
           }
         } else {
           setPageUrl(null);
@@ -252,7 +271,7 @@ function App() {
     };
 
     initialize();
-  }, []);
+  }, [hasStarted, pageUrl]);
 
   useEffect(() => {
     if (!pageUrl) {
@@ -458,6 +477,9 @@ function App() {
         setRelationGraph(nextGraph);
         await saveRelationGraph(pageUrl, nextGraph);
       }
+
+      // Decision processed - stay on decision screen for next dependency
+      // The intro screen will show again on next popup open
     } catch (error) {
       console.error('Failed to process decision', error);
     } finally {
@@ -472,6 +494,70 @@ function App() {
     }
   };
 
+  // Handle start action - trigger API calls and show loading
+  const handleStart = async () => {
+    if (!pageUrl) {
+      // If pageUrl not set yet, get it first
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (tab.url && tab.url.includes('polymarket.com/event/')) {
+        setPageUrl(tab.url);
+        setHasStarted(true);
+        setCurrentScreen('decision');
+        setLoading(true);
+        return;
+      }
+      return;
+    }
+    
+    // Start the analysis
+    setHasStarted(true);
+    setCurrentScreen('decision');
+    setLoading(true);
+    
+    // Reset graph state to trigger fresh API calls
+    setRelationGraph(null);
+    setDependencyQueue([]);
+    setDependencyVisited([]);
+    
+    // The existing initialization logic will run via useEffect when hasStarted changes
+  };
+
+  // Handle not now - close popup
+  const handleNotNow = () => {
+    window.close();
+  };
+
+  // Show VideoLoader only when user has started (clicked "Start Pindex")
+  if (loading && hasStarted) {
+    return (
+      <div style={{ 
+        minWidth: '420px', 
+        minHeight: '600px', 
+        background: 'linear-gradient(145deg, #0f1520 0%, #0a0e16 50%, #080c12 100%)', 
+        color: '#e2e8f0', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center' 
+      }}>
+        <VideoLoader size={200} />
+      </div>
+    );
+  }
+
+  // Show intro screen when we have pageUrl but user hasn't started yet
+  // This takes priority over the loading state
+  if (pageUrl && !hasStarted) {
+    return (
+      <IntroScreen
+        eventTitle={eventTitle}
+        profileImage={eventImageUrl || marketImageUrl || profileImage}
+        onStart={handleStart}
+        onNotNow={handleNotNow}
+      />
+    );
+  }
+
+  // Only show loading for initial page detection (before we know if it's a Polymarket page)
   if (loading) {
     return (
       <div style={{ minWidth: '420px', minHeight: '600px', background: '#0a0f1a', color: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

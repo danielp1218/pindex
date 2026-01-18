@@ -32,7 +32,7 @@ interface OverlayAppProps {
   profileImage?: string | null;
 }
 
-type Screen = 'decision' | 'visualize' | 'add';
+type Screen = 'intro' | 'decision' | 'visualize' | 'add';
 
 function findNodeById(node: RelationGraphNode, id: string): RelationGraphNode | null {
   if (node.id === id) {
@@ -62,8 +62,9 @@ const buttonBase: React.CSSProperties = {
 };
 
 export function OverlayApp({ isVisible, onClose, profileImage: initialProfileImage }: OverlayAppProps) {
-  const [isLoading, setIsLoading] = useState(true);
-  const [currentScreen, setCurrentScreen] = useState<Screen>('decision');
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasStarted, setHasStarted] = useState(false);
+  const [currentScreen, setCurrentScreen] = useState<Screen>('intro');
   const [userSelection, setUserSelection] = useState<'yes' | 'no' | null>(null);
   const [profileImage, setProfileImage] = useState<string | null>(initialProfileImage || null);
   const [eventImageUrl, setEventImageUrl] = useState<string | null>(null);
@@ -138,7 +139,10 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
   const displayItem = queuedItem ?? rootFallbackItem;
   const showUserSelection = Boolean(rootFallbackItem && !queuedItem);
   const decisionTitle = displayItem?.question ?? eventTitle;
-  const showLoader = currentScreen === 'decision' && (isLoading || !displayItem);
+  
+  // Show loader until we have FULL dependency data (with explanation/source), not just root fallback
+  const hasFullDependencyData = queuedItem && (queuedItem.explanation || queuedItem.sourceQuestion);
+  const showLoader = isLoading || (currentScreen === 'decision' && !hasFullDependencyData && !hasVisitedRoot);
   const queueEmpty = currentScreen === 'decision' && !displayItem && hasVisitedRoot;
 
   const graphView = useMemo<GraphData>(() => {
@@ -219,6 +223,16 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     setAccepted(null);
   }, [displayItem?.id]);
 
+  // Reset state when overlay opens - always show intro screen first
+  useEffect(() => {
+    if (isVisible) {
+      setHasStarted(false);
+      setCurrentScreen('intro');
+      setIsLoading(false);
+      setRelationGraph(null);
+    }
+  }, [isVisible]);
+
   // Update profile image when prop changes
   useEffect(() => {
     if (initialProfileImage) {
@@ -226,79 +240,168 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     }
   }, [initialProfileImage]);
 
-  // Extract event info from URL and load relation graph
+  // Extract event info from URL (basic info for intro screen)
   useEffect(() => {
-    if (!isVisible) {
+    if (!isVisible || !currentUrl) {
       return;
     }
 
-    let isActive = true;
+    const slug = currentUrl.split('/event/')[1]?.split('?')[0] || '';
+    const title = slug.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()) || 'Market';
+    setEventTitle(title);
 
-    const initialize = async () => {
-      if (!currentUrl) {
-        setIsLoading(false);
-        return;
-      }
-
-      setIsLoading(true);
-
-      const slug = currentUrl.split('/event/')[1]?.split('?')[0] || '';
-      const title = slug.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()) || 'Market';
-      setEventTitle(title);
-
-      let selection: 'yes' | 'no' | null = null;
+    // Get user selection from storage
+    (async () => {
       try {
         const stored = await browser.storage.local.get(['lastUserSelection', 'selectionTimestamp']);
         if (stored.lastUserSelection && typeof stored.selectionTimestamp === 'number') {
           const age = Date.now() - stored.selectionTimestamp;
           if (age < 30000 && (stored.lastUserSelection === 'yes' || stored.lastUserSelection === 'no')) {
-            selection = stored.lastUserSelection;
+            setUserSelection(stored.lastUserSelection);
           }
         }
       } catch (e) {
         console.error('Error getting stored selection:', e);
       }
+    })();
+  }, [isVisible, currentUrl]);
 
-      if (!isActive) {
-        return;
-      }
+  // Load relation graph only after user starts, then auto-accept root decision
+  useEffect(() => {
+    if (!isVisible || !hasStarted || !currentUrl) {
+      return;
+    }
 
-      setUserSelection(selection);
+    let isActive = true;
+
+    const loadGraphAndProcessRoot = async () => {
+      // Stay on loading screen (don't change currentScreen yet)
+      setIsLoading(true);
+      
+      // Track start time for minimum loading duration
+      const startTime = Date.now();
+      const MIN_LOADING_TIME = 4000; // Minimum 4 seconds of loading animation
+
+      let loadedGraph: RelationGraphNode | null = null;
 
       try {
-        const graph = await loadRelationGraph({
+        loadedGraph = await loadRelationGraph({
           url: currentUrl,
-          title,
+          title: eventTitle,
           imageUrl: eventImageUrl || profileImage || undefined,
-          decision: selection ?? undefined,
+          decision: userSelection ?? undefined,
         });
         if (isActive) {
-          setRelationGraph(graph);
+          setRelationGraph(loadedGraph);
         }
       } catch (error) {
         console.error('Error loading relation graph:', error);
-        const graph = createRootGraph({
+        loadedGraph = createRootGraph({
           url: currentUrl,
-          title,
+          title: eventTitle,
           imageUrl: eventImageUrl || profileImage || undefined,
-          decision: selection ?? undefined,
+          decision: userSelection ?? undefined,
         });
         if (isActive) {
-          setRelationGraph(graph);
+          setRelationGraph(loadedGraph);
         }
-        await saveRelationGraph(currentUrl, graph);
-      } finally {
-        if (isActive) {
-          setIsLoading(false);
+        await saveRelationGraph(currentUrl, loadedGraph);
+      }
+
+      // After graph loads, automatically accept the root decision and search for dependencies
+      if (isActive && loadedGraph) {
+        try {
+          // Small delay to ensure queue state is initialized
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          // Get the root fallback item (the current market)
+          const rootDecision = userSelection ?? 'yes';
+          
+          // Process the root decision as accepted to start dependency search
+          const result = await processDependencyDecisionInBackground({
+            eventUrl: currentUrl,
+            keep: true, // Accept the root decision
+            fallbackDecision: rootDecision,
+            fallbackWeight: 1,
+            risk: riskLevel,
+          });
+
+          if (isActive) {
+            // Check if we have actual dependency data with full details (explanation, source, etc.)
+            const firstItem = result.queue[0];
+            const hasFullData = firstItem && (firstItem.explanation || firstItem.sourceQuestion);
+            
+            if (hasFullData) {
+              // We have full dependency data! Update state and show decision screen
+              setDependencyQueue(result.queue);
+              setDependencyVisited(result.visited);
+              
+              // Wait for state to be applied
+              await new Promise(resolve => setTimeout(resolve, 100));
+              
+              // Ensure minimum loading time
+              const elapsed = Date.now() - startTime;
+              if (elapsed < MIN_LOADING_TIME) {
+                await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed));
+              }
+              
+              setIsLoading(false);
+              setCurrentScreen('decision');
+            } else if (result.queue.length > 0) {
+              // We have queue items but not full data - update queue but keep loading
+              // This shouldn't normally happen, but handle it gracefully
+              setDependencyQueue(result.queue);
+              setDependencyVisited(result.visited);
+              
+              const elapsed = Date.now() - startTime;
+              if (elapsed < MIN_LOADING_TIME) {
+                await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed));
+              }
+              
+              setIsLoading(false);
+              setCurrentScreen('decision');
+            } else {
+              // No dependencies found - show root fallback after minimum time
+              setDependencyVisited(result.visited);
+              
+              const elapsed = Date.now() - startTime;
+              if (elapsed < MIN_LOADING_TIME) {
+                await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed));
+              }
+              
+              setIsLoading(false);
+              setCurrentScreen('decision');
+            }
+          }
+        } catch (error) {
+          console.error('Error processing root decision:', error);
+          // On error, keep loading longer then show what we have
+          if (isActive) {
+            const elapsed = Date.now() - startTime;
+            const errorWaitTime = Math.max(MIN_LOADING_TIME, 5000); // Wait at least 5 seconds on error
+            if (elapsed < errorWaitTime) {
+              await new Promise(resolve => setTimeout(resolve, errorWaitTime - elapsed));
+            }
+            setIsLoading(false);
+            setCurrentScreen('decision');
+          }
         }
+      } else if (isActive) {
+        // If graph didn't load, ensure minimum loading time
+        const elapsed = Date.now() - startTime;
+        if (elapsed < MIN_LOADING_TIME) {
+          await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed));
+        }
+        setIsLoading(false);
+        setCurrentScreen('decision');
       }
     };
 
-    void initialize();
+    void loadGraphAndProcessRoot();
     return () => {
       isActive = false;
     };
-  }, [isVisible, currentUrl, eventImageUrl, profileImage]);
+  }, [isVisible, hasStarted, currentUrl, eventTitle, eventImageUrl, profileImage, userSelection, riskLevel]);
 
   useEffect(() => {
     if (!currentUrl) {
@@ -944,6 +1047,19 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     const nextGraph = addChildNode(relationGraph, relationGraph.id, newNode);
     setRelationGraph(nextGraph);
     await saveRelationGraph(currentUrl, nextGraph);
+  };
+
+  // Handle Start Pindex - begin analysis
+  const handleStart = async () => {
+    setHasStarted(true);
+    setIsLoading(true);
+    // The useEffect will pick up hasStarted change and load the graph
+    // After graph loads, we'll auto-accept the root decision and search for dependencies
+  };
+
+  // Handle Not Now - close overlay
+  const handleNotNow = () => {
+    onClose();
   };
 
   const handleDecision = async (accept: boolean) => {
@@ -1705,8 +1821,8 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
               </div>
             </div>
 
-            {/* Navigation (for non-decision screens) */}
-            {currentScreen !== 'decision' && (
+            {/* Navigation (for non-decision/intro screens) */}
+            {currentScreen !== 'decision' && currentScreen !== 'intro' && (
               <div style={{
                 position: 'relative',
                 zIndex: 3,
@@ -1768,11 +1884,117 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
                 gap: '12px',
               }}>
                 <VideoLoader size={160} />
-                {queueEmpty && (
-                  <span style={{ fontSize: '13px', color: '#94a3b8', letterSpacing: '0.4px' }}>
-                    calculating...
-                  </span>
-                )}
+                <span style={{ fontSize: '13px', color: '#94a3b8', letterSpacing: '0.4px' }}>
+                  {isLoading ? 'searching dependencies...' : 'calculating...'}
+                </span>
+              </div>
+            ) : currentScreen === 'intro' ? (
+              /* Intro Screen */
+              <div style={{
+                position: 'relative',
+                zIndex: 3,
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '32px 24px',
+                gap: '24px',
+              }}>
+                {/* Market image */}
+                <div style={{
+                  width: '80px',
+                  height: '80px',
+                  borderRadius: '16px',
+                  overflow: 'hidden',
+                  border: '2px solid rgba(255, 255, 255, 0.1)',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+                }}>
+                  {displayImage ? (
+                    <img 
+                      src={displayImage} 
+                      alt="" 
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                    />
+                  ) : (
+                    <div style={{
+                      width: '100%',
+                      height: '100%',
+                      background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '24px',
+                      fontWeight: 600,
+                      color: '#64748b',
+                    }}>
+                      {eventTitle.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+
+                {/* Event title */}
+                <div style={{ textAlign: 'center' }}>
+                  <h2 style={{
+                    fontSize: '16px',
+                    fontWeight: 600,
+                    color: '#f1f5f9',
+                    margin: '0 0 8px 0',
+                    lineHeight: 1.3,
+                  }}>
+                    {eventTitle}
+                  </h2>
+                  <p style={{
+                    fontSize: '13px',
+                    color: '#64748b',
+                    margin: 0,
+                  }}>
+                    Analyze market dependencies and correlations
+                  </p>
+                </div>
+
+                {/* Buttons */}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                  width: '100%',
+                  maxWidth: '260px',
+                }}>
+                  <button
+                    onClick={handleStart}
+                    style={{
+                      padding: '14px 24px',
+                      borderRadius: '12px',
+                      border: 'none',
+                      background: 'linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)',
+                      color: '#ffffff',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 16px rgba(59, 130, 246, 0.3)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    Start Pindex
+                  </button>
+                  <button
+                    onClick={handleNotNow}
+                    style={{
+                      padding: '12px 24px',
+                      borderRadius: '12px',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      background: 'transparent',
+                      color: '#94a3b8',
+                      fontSize: '13px',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    Not now
+                  </button>
+                </div>
               </div>
             ) : (
               <>
