@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, Suspense, lazy } from 'react';
 import './App.css';
 import { getDependencyState, getEventIdFromUrl, type DependencyQueueItem } from '@/utils/eventStorage';
 import { processDependencyDecisionInBackground } from '@/utils/dependencyWorker';
@@ -22,11 +22,28 @@ import {
   type GraphOutcomeDelta,
 } from '@/utils/globalsApi';
 import { fetchEventInfoFromUrl, type PolymarketEventInfo } from '@/utils/polymarketClient';
-import DecisionScreen from './DecisionScreen.tsx';
-import AddNodesScreen from './AddNodesScreen.tsx';
-import VisualizationScreen from './VisualizationScreen.tsx';
 import IntroScreen from './IntroScreen.tsx';
 import { VideoLoader } from '../overlay/VideoLoader';
+
+// Lazy load heavy screens - they're not needed on initial render
+const DecisionScreen = lazy(() => import('./DecisionScreen.tsx'));
+const AddNodesScreen = lazy(() => import('./AddNodesScreen.tsx'));
+const VisualizationScreen = lazy(() => import('./VisualizationScreen.tsx'));
+
+// Loading fallback component for Suspense
+const ScreenLoader = () => (
+  <div style={{
+    minWidth: '420px',
+    minHeight: '600px',
+    background: 'linear-gradient(145deg, #0f1520 0%, #0a0e16 50%, #080c12 100%)',
+    color: '#e2e8f0',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  }}>
+    <VideoLoader size={200} />
+  </div>
+);
 
 type Screen = 'intro' | 'decision' | 'add' | 'visualize';
 
@@ -654,21 +671,23 @@ function App() {
       );
     }
     return (
-      <DecisionScreen
-        eventTitle={displayItem?.question ?? eventTitle}
-        userSelection={userSelection}
-        profileImage={eventImageUrl || marketImageUrl || profileImage}
-        onViewNodes={() => setCurrentScreen('visualize')}
-        onDecision={handleDecision}
-        isProcessing={decisionDisabled}
-        miniGraphData={miniGraphData}
-        showUserSelection={Boolean(rootFallbackItem && !queuedItem)}
-        globalsBaseline={globalsBaseline}
-        globalsCandidate={globalsCandidate}
-        globalsDelta={globalsDelta}
-        globalsLoading={globalsLoading}
-        globalsError={globalsError}
-      />
+      <Suspense fallback={<ScreenLoader />}>
+        <DecisionScreen
+          eventTitle={displayItem?.question ?? eventTitle}
+          userSelection={userSelection}
+          profileImage={eventImageUrl || marketImageUrl || profileImage}
+          onViewNodes={() => setCurrentScreen('visualize')}
+          onDecision={handleDecision}
+          isProcessing={decisionDisabled}
+          miniGraphData={miniGraphData}
+          showUserSelection={Boolean(rootFallbackItem && !queuedItem)}
+          globalsBaseline={globalsBaseline}
+          globalsCandidate={globalsCandidate}
+          globalsDelta={globalsDelta}
+          globalsLoading={globalsLoading}
+          globalsError={globalsError}
+        />
+      </Suspense>
     );
   }
 
@@ -745,15 +764,17 @@ function App() {
         </button>
       </div>
       
-      {currentScreen === 'visualize' ? (
-        <VisualizationScreen graphData={graphView} />
-      ) : (
-        <AddNodesScreen
-          relationGraph={relationGraph ?? createRootGraph({ url: pageUrl ?? 'root' })}
-          onGraphUpdate={saveGraphData}
-          marketImageUrl={eventImageUrl || marketImageUrl || profileImage}
-        />
-      )}
+      <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '520px' }}><VideoLoader size={120} /></div>}>
+        {currentScreen === 'visualize' ? (
+          <VisualizationScreen graphData={graphView} />
+        ) : (
+          <AddNodesScreen
+            relationGraph={relationGraph ?? createRootGraph({ url: pageUrl ?? 'root' })}
+            onGraphUpdate={saveGraphData}
+            marketImageUrl={eventImageUrl || marketImageUrl || profileImage}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

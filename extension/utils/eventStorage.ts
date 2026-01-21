@@ -32,6 +32,7 @@ export interface DependencyQueueItem {
 export interface DependencyQueueState {
   queue: DependencyQueueItem[];
   visited: string[];
+  hasInitialFetch?: boolean; // True after first real API call
 }
 
 /**
@@ -109,8 +110,9 @@ export async function getDependencyState(url: string): Promise<DependencyQueueSt
   const state = await getCurrentPageState(url);
   const queue = Array.isArray(state?.dependencyQueue) ? state?.dependencyQueue : [];
   const visited = Array.isArray(state?.visitedUrls) ? state?.visitedUrls : [];
+  const hasInitialFetch = Boolean(state?.hasInitialFetch);
 
-  return { queue, visited };
+  return { queue, visited, hasInitialFetch };
 }
 
 /**
@@ -119,12 +121,24 @@ export async function getDependencyState(url: string): Promise<DependencyQueueSt
 export async function setDependencyState(
   url: string,
   queue: DependencyQueueItem[],
-  visited: string[]
+  visited: string[],
+  hasInitialFetch?: boolean
 ): Promise<void> {
-  await updateCurrentPageState(url, {
+  const update: Record<string, any> = {
     dependencyQueue: queue,
     visitedUrls: visited,
-  });
+  };
+  if (hasInitialFetch !== undefined) {
+    update.hasInitialFetch = hasInitialFetch;
+  }
+  await updateCurrentPageState(url, update);
+}
+
+/**
+ * Reset hasInitialFetch flag to force fresh API call
+ */
+export async function resetInitialFetchFlag(url: string): Promise<void> {
+  await updateCurrentPageState(url, { hasInitialFetch: false });
 }
 
 /**

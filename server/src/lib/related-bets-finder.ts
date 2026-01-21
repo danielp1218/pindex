@@ -4,7 +4,10 @@ import {
   fetchMarkets,
   searchEventsByKeywords,
   searchEventsByCategory,
+  fetchTags,
+  fetchEventsByTag,
   type PolymarketEvent,
+  type PolymarketTag,
 } from './polymarket-api';
 import { fetchEventMarkets } from './url-parser';
 import { logMessage, type Logger } from './logger';
@@ -281,6 +284,70 @@ async function getMarketCategory(
   }
 }
 
+/**
+ * Infer relevant tags for a market using LLM
+ */
+async function inferRelevantTags(
+  market: PolymarketMarket,
+  availableTags: PolymarketTag[],
+  c: Context,
+  logger?: Logger
+): Promise<string[]> {
+  if (availableTags.length === 0) {
+    logMessage(logger, 'log', 'No available tags to infer from');
+    return [];
+  }
+
+  try {
+    const tagsContext = availableTags
+      .map((t) => `ID: ${t.id} | Label: ${t.label}`)
+      .join('\n');
+
+    const completion = await openai(c).chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You are selecting the most relevant tags for a prediction market.
+
+Available tags:
+${tagsContext}
+
+Select 2-4 tag IDs that are MOST relevant to the market. Only select tags that directly relate to the market's topic.
+
+Return JSON with tag IDs array:
+{"tag_ids": ["id1", "id2"]}`
+        },
+        {
+          role: 'user',
+          content: `Market: ${market.question}\nDescription: ${market.description?.substring(0, 200) || 'N/A'}\n\nSelect relevant tag IDs:`
+        }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.2,
+      max_tokens: 100,
+    });
+
+    const content = completion.choices[0].message.content?.trim() || '{}';
+    const result = JSON.parse(content);
+    const tagIds = result.tag_ids || [];
+
+    // Validate that returned IDs exist in available tags
+    const validTagIds = new Set(availableTags.map((t) => t.id));
+    const validatedIds = tagIds.filter((id: string) => validTagIds.has(id));
+
+    logMessage(
+      logger,
+      'log',
+      `Inferred ${validatedIds.length} relevant tags for "${market.question}": ${validatedIds.join(', ')}`
+    );
+    return validatedIds;
+  } catch (error) {
+    logMessage(logger, 'error', 'Error inferring relevant tags', error);
+    return [];
+  }
+}
+
 export interface FoundRelatedBet {
   marketId: string;
   market: PolymarketMarket;
@@ -418,43 +485,70 @@ export async function* findRelatedBets(
   let eventMarkets: any[] = [];
 
   try {
-    logMessage(logger, 'log', 'Starting keyword-based event search...');
-
-    // Step 1: Generate search keywords using LLM (returns array)
-    const keywords = await generateSearchKeywords(sourceMarket, c, logger);
-
-
-
-    // Step 2: Search for events using each keyword individually and combine results
+    logMessage(logger, 'log', 'Starting tag-based event search...');
 
     const allEvents: PolymarketEvent[] = [];
     const seenEventSlugs = new Set<string>();
 
-    for (const keyword of keywords) {
-      const keywordEvents = await searchEventsByKeywords(keyword, logger);
+    // Step 1: Fetch available tags (cached)
+    const availableTags = await fetchTags(logger);
+    logMessage(logger, 'log', `Loaded ${availableTags.length} available tags`);
+
+    // Step 2: Infer relevant tags via LLM
+    const relevantTagIds = await inferRelevantTags(sourceMarket, availableTags, c, logger);
+
+    // Step 3: Fetch events for each tag ID (parallel)
+    if (relevantTagIds.length > 0) {
+      const tagEventResults = await Promise.all(
+        relevantTagIds.map((tagId) => fetchEventsByTag(tagId, logger))
+      );
+      for (const tagEvents of tagEventResults) {
+        for (const event of tagEvents) {
+          if (!seenEventSlugs.has(event.slug)) {
+            seenEventSlugs.add(event.slug);
+            allEvents.push(event);
+          }
+        }
+      }
       logMessage(
         logger,
         'log',
-        `Found ${keywordEvents.length} events for keyword "${keyword}"`
+        `Total unique events from tag search: ${allEvents.length}`
       );
-
-      for (const event of keywordEvents) {
-        if (!seenEventSlugs.has(event.slug)) {
-          seenEventSlugs.add(event.slug);
-          allEvents.push(event);
-        }
-      }
     }
 
-    logMessage(
-      logger,
-      'log',
-      `Total unique events from all keywords: ${allEvents.length}`
-    );
+    // Step 4: If < 10 events, supplement with keyword search (parallel)
+    if (allEvents.length < 10) {
+      logMessage(logger, 'log', 'Tag search insufficient, adding keyword search...');
+      const keywords = await generateSearchKeywords(sourceMarket, c, logger);
+
+      const keywordEventResults = await Promise.all(
+        keywords.map((keyword) => searchEventsByKeywords(keyword, logger))
+      );
+      for (let i = 0; i < keywordEventResults.length; i++) {
+        const keywordEvents = keywordEventResults[i];
+        logMessage(
+          logger,
+          'log',
+          `Found ${keywordEvents.length} events for keyword "${keywords[i]}"`
+        );
+        for (const event of keywordEvents) {
+          if (!seenEventSlugs.has(event.slug)) {
+            seenEventSlugs.add(event.slug);
+            allEvents.push(event);
+          }
+        }
+      }
+      logMessage(
+        logger,
+        'log',
+        `Total unique events after keyword supplement: ${allEvents.length}`
+      );
+    }
 
     let events = allEvents;
 
-    // Step 3: Fallback to category-based search if no results
+    // Step 5: Fallback to category-based search if still no results
     if (events.length === 0) {
       logMessage(logger, 'log', 'No events found, trying category-based fallback...');
       const category = await getMarketCategory(sourceMarket, c, logger);
@@ -466,7 +560,7 @@ export async function* findRelatedBets(
       );
     }
 
-    // Step 4: LLM selects 8 most relevant events, filtering out visited slugs
+    // Step 6: LLM selects 8 most relevant events, filtering out visited slugs
     if (events.length > 0) {
       const selectedSlugs = await selectRelevantEvents(
         sourceMarket,
@@ -481,7 +575,7 @@ export async function* findRelatedBets(
         `LLM selected ${selectedSlugs.length} relevant events`
       );
 
-      // Step 5: Fetch markets from selected events and tag with event slug
+      // Step 7: Fetch markets from selected events and tag with event slug
       const eventMarketGroups = await mapWithConcurrency(
         selectedSlugs,
         EVENT_MARKETS_CONCURRENCY,
@@ -500,7 +594,7 @@ export async function* findRelatedBets(
       );
     }
   } catch (error) {
-    logMessage(logger, 'error', 'Error in keyword-based event search', error);
+    logMessage(logger, 'error', 'Error in tag-based event search', error);
     // Continue with empty eventMarkets on error
   }
 

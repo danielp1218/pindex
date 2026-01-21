@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import * as d3 from 'd3';
+import { select } from '@/utils/d3-imports';
 import { getRelationshipColor, type BetRelationship } from '@/types/graph';
 import type { GraphOutcomeResult, GraphOutcomeDelta } from '@/utils/globalsApi';
 
@@ -91,9 +91,9 @@ export default function DecisionScreen({
     const height = 90;
 
     // Clear previous render
-    d3.select(svgRef.current).selectAll('*').remove();
+    select(svgRef.current).selectAll('*').remove();
 
-    const svg = d3.select(svgRef.current)
+    const svg = select(svgRef.current)
       .attr('width', width)
       .attr('height', height)
       .attr('style', 'background: transparent; overflow: visible;');
@@ -125,8 +125,46 @@ export default function DecisionScreen({
       .attr('cx', 0)
       .attr('cy', 0);
 
+    // Create gradient placeholders for nodes without images
+    const gradientColors = [
+      ['#4a7c6f', '#2d5a4d'], // teal
+      ['#5c7a9e', '#3d5a7a'], // blue
+      ['#7a6b8a', '#5a4d6a'], // purple
+      ['#8a7a5c', '#6a5a3d'], // amber
+      ['#8b5c5c', '#6a3d3d'], // rose
+      ['#6b8a7a', '#4d6a5a'], // sage
+    ];
+
+    // Generate a consistent color index from label
+    const getColorIndex = (label: string) => {
+      let hash = 0;
+      for (let i = 0; i < label.length; i++) {
+        hash = ((hash << 5) - hash) + label.charCodeAt(i);
+        hash = hash & hash;
+      }
+      return Math.abs(hash) % gradientColors.length;
+    };
+
+    // Create gradients for each node
+    nodes.forEach((node, i) => {
+      const colorIdx = getColorIndex(node.fullLabel || node.label);
+      const [color1, color2] = gradientColors[colorIdx];
+      const gradient = defs.append('linearGradient')
+        .attr('id', `nodeGradient-${i}`)
+        .attr('x1', '0%')
+        .attr('y1', '0%')
+        .attr('x2', '100%')
+        .attr('y2', '100%');
+      gradient.append('stop')
+        .attr('offset', '0%')
+        .attr('stop-color', color1);
+      gradient.append('stop')
+        .attr('offset', '100%')
+        .attr('stop-color', color2);
+    });
+
     // Access tooltip for edge hover
-    const tooltip = d3.select(tooltipRef.current);
+    const tooltip = select(tooltipRef.current);
 
     // Draw link with relationship color
     const link = g.append('g')
@@ -138,7 +176,7 @@ export default function DecisionScreen({
       .attr('stroke-width', 2)
       .style('cursor', 'pointer')
       .on('mouseenter', (event: MouseEvent, d: any) => {
-        d3.select(event.target as Element)
+        select(event.target as Element)
           .attr('stroke-opacity', 1);
 
         const relationship = d.relationship || 'RELATED';
@@ -154,7 +192,7 @@ export default function DecisionScreen({
           .style('top', `${event.offsetY - 5}px`);
       })
       .on('mouseleave', (event: MouseEvent) => {
-        d3.select(event.target as Element)
+        select(event.target as Element)
           .attr('stroke-opacity', 0.6);
         tooltip.style('opacity', '0');
       });
@@ -166,10 +204,10 @@ export default function DecisionScreen({
       .join('g')
       .style('cursor', 'default');
 
-    // Render nodes with images if available, otherwise circle with text
-    node.each(function(d: any) {
-      const nodeGroup = d3.select(this);
-      
+    // Render nodes with images if available, otherwise gradient circle with text
+    node.each(function(d: any, i: number) {
+      const nodeGroup = select(this);
+
       if (d.imageUrl) {
         // Clipped image node
         nodeGroup.append('image')
@@ -181,21 +219,22 @@ export default function DecisionScreen({
           .attr('clip-path', 'url(#decisionMiniCircleClip)')
           .attr('preserveAspectRatio', 'xMidYMid slice');
       } else {
-        // Fallback circle with text
+        // Gradient circle placeholder with text
         nodeGroup.append('circle')
           .attr('r', nodeRadius)
-          .attr('fill', '#1e293b')
-          .attr('stroke', '#334155')
+          .attr('fill', `url(#nodeGradient-${i})`)
+          .attr('stroke', 'rgba(255, 255, 255, 0.2)')
           .attr('stroke-width', 1);
-        
+
         nodeGroup.append('text')
           .text(d.label)
           .attr('text-anchor', 'middle')
           .attr('dy', '0.35em')
-          .attr('fill', '#64748b')
-          .attr('font-size', '11px')
-          .attr('font-weight', '500')
-          .attr('pointer-events', 'none');
+          .attr('fill', '#ffffff')
+          .attr('font-size', '10px')
+          .attr('font-weight', '600')
+          .attr('pointer-events', 'none')
+          .attr('text-shadow', '0 1px 2px rgba(0,0,0,0.3)');
       }
     });
 

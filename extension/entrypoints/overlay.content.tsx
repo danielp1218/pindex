@@ -4,13 +4,15 @@ import { OverlayApp } from './overlay/OverlayApp';
 export default defineContentScript({
   matches: ['*://*.polymarket.com/*'],
   cssInjectionMode: 'ui',
-  
+
   async main(ctx) {
-    // Track visibility, root, and profile image
+    // Track visibility, root, profile image, and initialization state
     let isVisible = false;
     let root: ReactDOM.Root | null = null;
     let profileImage: string | null = null;
-    
+    let isInitialized = false;
+    let ui: Awaited<ReturnType<typeof createShadowRootUi>> | null = null;
+
     // Function to extract profile image from Polymarket page
     const getProfileImage = (): string | null => {
       try {
@@ -41,15 +43,15 @@ export default defineContentScript({
               const style = window.getComputedStyle(imgElement);
               const width = parseInt(style.width) || imgElement.width || 0;
               const height = parseInt(style.height) || imgElement.height || 0;
-              
+
               // Check if it's a reasonable size for a profile picture
               if (width >= 30 && width <= 300 && height >= 30 && height <= 300) {
                 const borderRadius = style.borderRadius;
                 const isCircular = borderRadius && (
-                  borderRadius.includes('50%') || 
+                  borderRadius.includes('50%') ||
                   parseInt(borderRadius) >= Math.min(width, height) / 2
                 );
-                
+
                 if (isCircular || Math.abs(width - height) < width * 0.3) {
                   const src = imgElement.src;
                   if (src && (src.startsWith('http') || src.startsWith('data:')) && !src.includes('placeholder')) {
@@ -69,18 +71,18 @@ export default defineContentScript({
         for (const img of allImages) {
           const imgElement = img as HTMLImageElement;
           if (!imgElement.src) continue;
-          
+
           const style = window.getComputedStyle(imgElement);
           const width = parseInt(style.width) || imgElement.width || 0;
           const height = parseInt(style.height) || imgElement.height || 0;
-          
+
           if (width > 30 && width < 300 && height > 30 && height < 300) {
             const borderRadius = style.borderRadius;
             const isCircular = borderRadius && (
-              borderRadius.includes('50%') || 
+              borderRadius.includes('50%') ||
               parseInt(borderRadius) >= Math.min(width, height) / 2
             );
-            
+
             if (isCircular || Math.abs(width - height) < 30) {
               const src = imgElement.src;
               if (src && (src.startsWith('http') || src.startsWith('data:')) && !src.includes('placeholder')) {
@@ -95,56 +97,17 @@ export default defineContentScript({
       return null;
     };
 
-    // Create the UI container using WXT's shadow DOM helper
-    const ui = await createShadowRootUi(ctx, {
-      name: 'pindex-overlay',
-      position: 'overlay',
-      onMount: (container) => {
-        // Style the container to be a full-screen overlay container
-        container.style.position = 'fixed';
-        container.style.top = '0';
-        container.style.left = '0';
-        container.style.width = '100vw';
-        container.style.height = '100vh';
-        container.style.zIndex = '2147483647';
-        container.style.pointerEvents = 'none';
-        
-        // Create wrapper for React
-        const wrapper = document.createElement('div');
-        wrapper.id = 'pindex-overlay-root';
-        wrapper.style.position = 'absolute';
-        wrapper.style.top = '0';
-        wrapper.style.left = '0';
-        wrapper.style.width = '100%';
-        wrapper.style.height = '100%';
-        wrapper.style.pointerEvents = 'none';
-        container.appendChild(wrapper);
-        
-        // Create React root
-        root = ReactDOM.createRoot(wrapper);
-        
-        // Initial render (hidden)
-        renderApp(false);
-        
-        return wrapper;
-      },
-      onRemove: () => {
-        root?.unmount();
-        root = null;
-      },
-    });
-
-    // Render function
+    // Render function - only works after initialization
     const renderApp = (visible: boolean) => {
       // Get fresh profile image when showing
       if (visible) {
         profileImage = getProfileImage();
       }
-      
+
       if (root) {
         root.render(
-          <OverlayApp 
-            isVisible={visible} 
+          <OverlayApp
+            isVisible={visible}
             onClose={() => {
               isVisible = false;
               renderApp(false);
@@ -155,22 +118,86 @@ export default defineContentScript({
       }
     };
 
-    // Mount the UI
-    ui.mount();
-    
+    // Initialize the overlay UI - only called on first activation
+    const initializeOverlay = async () => {
+      if (isInitialized) return;
+      isInitialized = true;
+
+      // Create the UI container using WXT's shadow DOM helper
+      ui = await createShadowRootUi(ctx, {
+        name: 'pindex-overlay',
+        position: 'overlay',
+        onMount: (container) => {
+          // Style the container to be a full-screen overlay container
+          container.style.position = 'fixed';
+          container.style.top = '0';
+          container.style.left = '0';
+          container.style.width = '100vw';
+          container.style.height = '100vh';
+          container.style.zIndex = '2147483647';
+          container.style.pointerEvents = 'none';
+
+          // Create wrapper for React
+          const wrapper = document.createElement('div');
+          wrapper.id = 'pindex-overlay-root';
+          wrapper.style.position = 'absolute';
+          wrapper.style.top = '0';
+          wrapper.style.left = '0';
+          wrapper.style.width = '100%';
+          wrapper.style.height = '100%';
+          wrapper.style.pointerEvents = 'none';
+          container.appendChild(wrapper);
+
+          // Create React root
+          root = ReactDOM.createRoot(wrapper);
+
+          return wrapper;
+        },
+        onRemove: () => {
+          root?.unmount();
+          root = null;
+        },
+      });
+
+      // Mount the UI
+      ui.mount();
+    };
+
     // Listen for toggle messages from background script
+    // DEFERRED: Only initialize overlay on first activation
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.action === 'toggleOverlay') {
+        // Initialize on first toggle if needed
+        if (!isInitialized) {
+          initializeOverlay().then(() => {
+            isVisible = true;
+            renderApp(true);
+            sendResponse({ visible: isVisible });
+          });
+          return true; // Keep message channel open for async response
+        }
         isVisible = !isVisible;
         renderApp(isVisible);
         sendResponse({ visible: isVisible });
       } else if (message.action === 'showOverlay') {
+        // Initialize on first show if needed
+        if (!isInitialized) {
+          initializeOverlay().then(() => {
+            isVisible = true;
+            renderApp(true);
+            sendResponse({ visible: true });
+          });
+          return true; // Keep message channel open for async response
+        }
         isVisible = true;
         renderApp(true);
         sendResponse({ visible: true });
       } else if (message.action === 'hideOverlay') {
-        isVisible = false;
-        renderApp(false);
+        // Only hide if already initialized
+        if (isInitialized) {
+          isVisible = false;
+          renderApp(false);
+        }
         sendResponse({ visible: false });
       } else if (message.action === 'getOverlayState') {
         sendResponse({ visible: isVisible });

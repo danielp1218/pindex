@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import * as d3 from 'd3';
+import type { Simulation } from 'd3-force';
+
+// D3 is loaded dynamically in useEffect to avoid parsing on initial load
 import { VideoLoader } from './VideoLoader';
 import { getRelationshipColor, type BetRelationship, type GraphData } from '@/types/graph';
-import { getDependencyState, getEventIdFromUrl, type DependencyQueueItem } from '@/utils/eventStorage';
+import { getDependencyState, getEventIdFromUrl, resetInitialFetchFlag, type DependencyQueueItem } from '@/utils/eventStorage';
 import { processDependencyDecisionInBackground } from '@/utils/dependencyWorker';
 import type { RelationGraphNode } from '@/types/relationGraph';
 import {
@@ -32,7 +34,7 @@ interface OverlayAppProps {
   profileImage?: string | null;
 }
 
-type Screen = 'intro' | 'decision' | 'visualize' | 'add';
+type Screen = 'intro' | 'decision' | 'visualize' | 'add' | 'bets';
 
 function findNodeById(node: RelationGraphNode, id: string): RelationGraphNode | null {
   if (node.id === id) {
@@ -86,6 +88,10 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
   const [addBtnHover, setAddBtnHover] = useState(false);
   const [startHover, setStartHover] = useState(false);
   const [notNowHover, setNotNowHover] = useState(false);
+  const [betHover, setBetHover] = useState(false);
+  const [betSummaryHoveredNode, setBetSummaryHoveredNode] = useState<string | null>(null);
+  const [betBackHover, setBetBackHover] = useState(false);
+  const [allocationHoveredNode, setAllocationHoveredNode] = useState<string | null>(null);
 
   const [relationGraph, setRelationGraph] = useState<RelationGraphNode | null>(null);
   const [dependencyQueue, setDependencyQueue] = useState<DependencyQueueItem[]>([]);
@@ -195,6 +201,9 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       : relationGraph;
     const sourceLabel = displayItem.sourceQuestion ?? sourceNode.label ?? sourceNode.id;
 
+    // For source node: use its own image, or fall back to target's image
+    const sourceImageFallback = sourceNode.imageUrl || sourceItemImage || displayItem.imageUrl || displayItemImage;
+
     return {
       nodes: [
         {
@@ -203,7 +212,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
           fullLabel: sourceLabel,
           x: 70,
           y: 55,
-          imageUrl: sourceNode.imageUrl || sourceItemImage,
+          imageUrl: sourceImageFallback,
         },
         targetNode,
       ],
@@ -218,7 +227,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       sourceLabel,
       targetLabel,
       reasoning: displayItem.explanation ?? '',
-      sourceImageUrl: sourceNode.imageUrl || sourceItemImage,
+      sourceImageUrl: sourceImageFallback,
     };
   }, [relationGraph, displayItem, displayItemImage, sourceItemImage]);
 
@@ -233,8 +242,12 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       setCurrentScreen('intro');
       setIsLoading(false);
       setRelationGraph(null);
+      // Reset initial fetch flag so API is called fresh on this session
+      if (currentUrl) {
+        void resetInitialFetchFlag(currentUrl);
+      }
     }
-  }, [isVisible]);
+  }, [isVisible, currentUrl]);
 
   // Update profile image when prop changes
   useEffect(() => {
@@ -283,7 +296,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       
       // Track start time for minimum loading duration
       const startTime = Date.now();
-      const MIN_LOADING_TIME = 4000; // Minimum 4 seconds of loading animation
+      const MIN_LOADING_TIME = 800; // Minimum 0.8 seconds of loading animation
 
       let loadedGraph: RelationGraphNode | null = null;
 
@@ -314,9 +327,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       // After graph loads, automatically accept the root decision and search for dependencies
       if (isActive && loadedGraph) {
         try {
-          // Small delay to ensure queue state is initialized
-          await new Promise(resolve => setTimeout(resolve, 100));
-          
           // Get the root fallback item (the current market)
           const rootDecision = userSelection ?? 'yes';
           
@@ -338,10 +348,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
               // We have full dependency data! Update state and show decision screen
               setDependencyQueue(result.queue);
               setDependencyVisited(result.visited);
-              
-              // Wait for state to be applied
-              await new Promise(resolve => setTimeout(resolve, 100));
-              
+
               // Ensure minimum loading time
               const elapsed = Date.now() - startTime;
               if (elapsed < MIN_LOADING_TIME) {
@@ -381,7 +388,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
           // On error, keep loading longer then show what we have
           if (isActive) {
             const elapsed = Date.now() - startTime;
-            const errorWaitTime = Math.max(MIN_LOADING_TIME, 5000); // Wait at least 5 seconds on error
+            const errorWaitTime = MIN_LOADING_TIME; // Use same minimum on error
             if (elapsed < errorWaitTime) {
               await new Promise(resolve => setTimeout(resolve, errorWaitTime - elapsed));
             }
@@ -613,7 +620,9 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
 
         setGlobalsBaseline(baseline);
         setGlobalsCandidate(candidate ?? baseline);
-        setGlobalsDelta(queuedItem && candidate ? computeOutcomeDelta(baseline, candidate) : null);
+        // Pass weight for mock calculations when API returns zero delta (sample dependencies)
+        const mockWeight = queuedItem?.id?.startsWith('sample-') ? queuedItem.weight : undefined;
+        setGlobalsDelta(queuedItem && candidate ? computeOutcomeDelta(baseline, candidate, mockWeight) : null);
       } catch (error) {
         if (!isActive) {
           return;
@@ -639,25 +648,34 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
   useEffect(() => {
     if (!isVisible || isLoading || currentScreen !== 'decision' || !miniGraphData) return;
 
-    let simulation: d3.Simulation<any, undefined> | null = null;
+    let simulation: Simulation<any, undefined> | null = null;
+    let cancelled = false;
 
-    // Small delay to ensure DOM is mounted after loading completes
-    const timeoutId = setTimeout(() => {
-      if (!svgRef.current) return;
+    // Dynamically import D3 and render graph
+    const renderGraph = async () => {
+      // Small delay to ensure DOM is mounted after loading completes
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      if (cancelled || !svgRef.current) return;
+
+      // Dynamic import of D3 - only loaded when graph is actually rendered
+      const { select, d3Zoom, forceSimulation, forceLink, drag } = await import('@/utils/d3-imports');
+
+      if (cancelled) return;
 
       const width = 320;
       const height = 90;
 
-      d3.select(svgRef.current).selectAll('*').remove();
+      select(svgRef.current).selectAll('*').remove();
 
-      const svg = d3.select(svgRef.current)
+      const svg = select(svgRef.current)
         .attr('width', width)
         .attr('height', height)
         .attr('style', 'background: transparent; overflow: visible;');
 
       const g = svg.append('g');
 
-      const zoom = d3.zoom<SVGSVGElement, unknown>()
+      const zoom = d3Zoom<SVGSVGElement, unknown>()
         .scaleExtent([0.1, 4])
         .on('zoom', (event) => {
           g.attr('transform', event.transform);
@@ -678,8 +696,8 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
         .filter(Boolean) as Array<any>;
 
       const nodeRadius = 16;
-      simulation = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(links).distance(200))
+      simulation = forceSimulation(nodes)
+        .force('link', forceLink(links).distance(200))
         .alphaDecay(0.05);
 
       // Add defs for clip path and arrow markers
@@ -690,6 +708,44 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
         .attr('r', nodeRadius - 2)
         .attr('cx', 0)
         .attr('cy', 0);
+
+      // Create gradient placeholders for nodes without images
+      const gradientColors = [
+        ['#4a7c6f', '#2d5a4d'], // teal
+        ['#5c7a9e', '#3d5a7a'], // blue
+        ['#7a6b8a', '#5a4d6a'], // purple
+        ['#8a7a5c', '#6a5a3d'], // amber
+        ['#8b5c5c', '#6a3d3d'], // rose
+        ['#6b8a7a', '#4d6a5a'], // sage
+      ];
+
+      // Generate a consistent color index from label
+      const getColorIndex = (label: string) => {
+        let hash = 0;
+        for (let i = 0; i < label.length; i++) {
+          hash = ((hash << 5) - hash) + label.charCodeAt(i);
+          hash = hash & hash;
+        }
+        return Math.abs(hash) % gradientColors.length;
+      };
+
+      // Create gradients for each node
+      nodes.forEach((node: any, i: number) => {
+        const colorIdx = getColorIndex(node.fullLabel || node.label);
+        const [color1, color2] = gradientColors[colorIdx];
+        const gradient = defs.append('linearGradient')
+          .attr('id', `miniNodeGradient-${i}`)
+          .attr('x1', '0%')
+          .attr('y1', '0%')
+          .attr('x2', '100%')
+          .attr('y2', '100%');
+        gradient.append('stop')
+          .attr('offset', '0%')
+          .attr('stop-color', color1);
+        gradient.append('stop')
+          .attr('offset', '100%')
+          .attr('stop-color', color2);
+      });
 
       // Add arrow markers for each relationship color in mini graph
       const miniColors = ['#4a7c6f', '#8b5c5c', '#5c7a9e', '#7a6b8a', '#8a7a5c', '#64748b'];
@@ -727,7 +783,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
         .data(nodes)
         .join('g')
         .style('cursor', 'grab')
-        .call(d3.drag<any, any>()
+        .call(drag<any, any>()
           .on('start', (event, d: any) => {
             if (!event.active) simulation?.alphaTarget(0.3).restart();
             d.fx = d.x;
@@ -744,10 +800,10 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
           })
         );
 
-      // Render nodes with images if available, otherwise circle with text
-      node.each(function(d: any) {
-        const nodeGroup = d3.select(this);
-        
+      // Render nodes with images if available, otherwise gradient circle with text
+      node.each(function(d: any, i: number) {
+        const nodeGroup = select(this);
+
         if (d.imageUrl) {
           // Clipped image node
           nodeGroup.append('image')
@@ -759,25 +815,25 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
             .attr('clip-path', 'url(#miniCircleClip)')
             .attr('preserveAspectRatio', 'xMidYMid slice');
         } else {
-          // Fallback circle with text
+          // Gradient circle placeholder with text
           nodeGroup.append('circle')
             .attr('r', nodeRadius)
-            .attr('fill', '#1e293b')
-            .attr('stroke', '#334155')
+            .attr('fill', `url(#miniNodeGradient-${i})`)
+            .attr('stroke', 'rgba(255, 255, 255, 0.2)')
             .attr('stroke-width', 1);
-          
+
           nodeGroup.append('text')
             .text(d.label)
             .attr('text-anchor', 'middle')
             .attr('dy', '0.35em')
-            .attr('fill', '#64748b')
-            .attr('font-size', '11px')
-            .attr('font-weight', '500')
+            .attr('fill', '#ffffff')
+            .attr('font-size', '10px')
+            .attr('font-weight', '600')
             .attr('pointer-events', 'none');
         }
       });
 
-      const tooltip = d3.select(tooltipRef.current);
+      const tooltip = select(tooltipRef.current);
       node
         .on('mouseenter', (event: MouseEvent, d: any) => {
           tooltip
@@ -808,10 +864,12 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
           return `translate(${x},${y})`;
         });
       });
-    }, 350);
+    };
+
+    void renderGraph();
 
     return () => {
-      clearTimeout(timeoutId);
+      cancelled = true;
       simulation?.stop();
     };
   }, [isVisible, isLoading, currentScreen, miniGraphData]);
@@ -877,197 +935,248 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
   useEffect(() => {
     if (!vizSvgRef.current || !isVisible || isLoading || currentScreen !== 'visualize') return;
 
-    const width = 380;
-    const height = 420;
+    let simulation: Simulation<any, undefined> | null = null;
+    let cancelled = false;
 
-    d3.select(vizSvgRef.current).selectAll('*').remove();
+    const renderFullGraph = async () => {
+      if (!vizSvgRef.current) return;
 
-    const svg = d3.select(vizSvgRef.current)
-      .attr('width', width)
-      .attr('height', height)
-      .attr('style', 'background: transparent; overflow: visible;');
+      // Dynamic import of D3 - only loaded when graph is actually rendered
+      const { select, d3Zoom, forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, drag } = await import('@/utils/d3-imports');
 
-    const g = svg.append('g');
+      if (cancelled) return;
 
-    const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 4])
-      .on('zoom', (event) => {
-        g.attr('transform', event.transform);
+      const width = 380;
+      const height = 420;
+
+      select(vizSvgRef.current).selectAll('*').remove();
+
+      const svg = select(vizSvgRef.current)
+        .attr('width', width)
+        .attr('height', height)
+        .attr('style', 'background: transparent; overflow: visible;');
+
+      const g = svg.append('g');
+
+      const zoom = d3Zoom<SVGSVGElement, unknown>()
+        .scaleExtent([0.1, 4])
+        .on('zoom', (event) => {
+          g.attr('transform', event.transform);
+        });
+
+      svg.call(zoom);
+
+      const nodes = graphView.nodes.map(d => ({ ...d }));
+      const links = graphView.links.map(d => ({ ...d }));
+
+      const nodeRadius = 24;
+      simulation = forceSimulation(nodes)
+        .force('link', forceLink(links).id((d: any) => d.id).distance(80))
+        .force('charge', forceManyBody().strength(-150))
+        .force('center', forceCenter(width / 2, height / 2))
+        .force('collision', forceCollide().radius(28))
+        .force('bounds', () => {
+          nodes.forEach((d: any) => {
+            d.x = Math.max(nodeRadius, Math.min(width - nodeRadius, d.x));
+            d.y = Math.max(nodeRadius, Math.min(height - nodeRadius, d.y));
+          });
+        });
+
+      const vizTooltip = select(vizTooltipRef.current);
+
+      const defs = svg.append('defs');
+      defs.append('clipPath')
+        .attr('id', 'circleClipOverlay')
+        .append('circle')
+        .attr('r', 20)
+        .attr('cx', 0)
+        .attr('cy', 0);
+
+      // Create gradient placeholders for nodes without images
+      const gradientColors = [
+        ['#4a7c6f', '#2d5a4d'], // teal
+        ['#5c7a9e', '#3d5a7a'], // blue
+        ['#7a6b8a', '#5a4d6a'], // purple
+        ['#8a7a5c', '#6a5a3d'], // amber
+        ['#8b5c5c', '#6a3d3d'], // rose
+        ['#6b8a7a', '#4d6a5a'], // sage
+      ];
+
+      // Generate a consistent color index from label
+      const getColorIndex = (label: string) => {
+        let hash = 0;
+        for (let i = 0; i < label.length; i++) {
+          hash = ((hash << 5) - hash) + label.charCodeAt(i);
+          hash = hash & hash;
+        }
+        return Math.abs(hash) % gradientColors.length;
+      };
+
+      // Create gradients for each node
+      nodes.forEach((node: any, i: number) => {
+        const colorIdx = getColorIndex(node.label || node.id);
+        const [color1, color2] = gradientColors[colorIdx];
+        const gradient = defs.append('linearGradient')
+          .attr('id', `vizNodeGradient-${i}`)
+          .attr('x1', '0%')
+          .attr('y1', '0%')
+          .attr('x2', '100%')
+          .attr('y2', '100%');
+        gradient.append('stop')
+          .attr('offset', '0%')
+          .attr('stop-color', color1);
+        gradient.append('stop')
+          .attr('offset', '100%')
+          .attr('stop-color', color2);
       });
 
-    svg.call(zoom);
+      // Add arrow markers for each relationship type
+      const relationshipColors = ['#4a7c6f', '#8b5c5c', '#5c7a9e', '#7a6b8a', '#8a7a5c', '#64748b'];
+      relationshipColors.forEach((color, i) => {
+        defs.append('marker')
+          .attr('id', `arrow-${i}`)
+          .attr('viewBox', '0 -5 10 10')
+          .attr('refX', 28) // Position arrow at edge of node (nodeRadius + arrow size)
+          .attr('refY', 0)
+          .attr('markerWidth', 6)
+          .attr('markerHeight', 6)
+          .attr('orient', 'auto')
+          .append('path')
+          .attr('fill', color)
+          .attr('d', 'M0,-5L10,0L0,5');
+      });
 
-    const nodes = graphView.nodes.map(d => ({ ...d }));
-    const links = graphView.links.map(d => ({ ...d }));
+      // Create a color to marker ID mapping
+      const colorToMarkerId = (color: string) => {
+        const index = relationshipColors.indexOf(color);
+        return index >= 0 ? `arrow-${index}` : 'arrow-5'; // Default to gray
+      };
 
-    const nodeRadius = 24;
-    const simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).id((d: any) => d.id).distance(80))
-      .force('charge', d3.forceManyBody().strength(-150))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(28))
-      .force('bounds', () => {
-        nodes.forEach((d: any) => {
-          d.x = Math.max(nodeRadius, Math.min(width - nodeRadius, d.x));
-          d.y = Math.max(nodeRadius, Math.min(height - nodeRadius, d.y));
+      const link = g.append('g')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('stroke', (d: any) => getRelationshipColor(d.relationship))
+        .attr('stroke-opacity', 0.6)
+        .attr('stroke-width', 2)
+        .attr('marker-end', (d: any) => `url(#${colorToMarkerId(getRelationshipColor(d.relationship))})`)
+        .style('cursor', 'pointer')
+        .on('mouseenter', (event: MouseEvent, d: any) => {
+          select(event.target as Element)
+            .attr('stroke-opacity', 1);
+
+          // Show relationship tooltip
+          const relationship = d.relationship || 'RELATED';
+
+          vizTooltip
+            .style('opacity', '1')
+            .style('left', `${event.offsetX + 15}px`)
+            .style('top', `${event.offsetY - 5}px`)
+            .style('white-space', 'pre-wrap')
+            .html(`<strong style="color: ${getRelationshipColor(d.relationship)}">${relationship}</strong>${d.reasoning ? `<br/><span style="color: #94a3b8; font-size: 10px; margin-top: 4px; display: block;">${d.reasoning}</span>` : ''}`);
+        })
+        .on('mousemove', (event: MouseEvent) => {
+          vizTooltip
+            .style('left', `${event.offsetX + 15}px`)
+            .style('top', `${event.offsetY - 5}px`);
+        })
+        .on('mouseleave', (event: MouseEvent) => {
+          select(event.target as Element)
+            .attr('stroke-opacity', 0.6);
+          vizTooltip.style('opacity', '0');
+        });
+
+      const node = g.append('g')
+        .selectAll('g')
+        .data(nodes)
+        .join('g')
+        .style('cursor', 'grab')
+        .call(drag<any, any>()
+          .on('start', (event, d: any) => {
+            if (!event.active) simulation?.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+          })
+          .on('drag', (event, d: any) => {
+            d.fx = event.x;
+            d.fy = event.y;
+          })
+          .on('end', (event, d: any) => {
+            if (!event.active) simulation?.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+          })
+        );
+
+      node.each(function(d: any, i: number) {
+        const nodeGroup = select(this);
+
+        if (d.imageUrl) {
+          nodeGroup.append('image')
+            .attr('href', d.imageUrl)
+            .attr('width', 40)
+            .attr('height', 40)
+            .attr('x', -20)
+            .attr('y', -20)
+            .attr('clip-path', 'url(#circleClipOverlay)')
+            .attr('preserveAspectRatio', 'xMidYMid slice');
+        } else {
+          // Gradient circle placeholder with text
+          nodeGroup.append('circle')
+            .attr('r', 18)
+            .attr('fill', `url(#vizNodeGradient-${i})`)
+            .attr('stroke', 'rgba(255, 255, 255, 0.2)')
+            .attr('stroke-width', 1);
+
+          nodeGroup.append('text')
+            .text(d.label.substring(0, 2).toUpperCase())
+            .attr('text-anchor', 'middle')
+            .attr('dy', '0.35em')
+            .attr('fill', '#ffffff')
+            .attr('font-size', '9px')
+            .attr('font-weight', '600')
+            .attr('pointer-events', 'none');
+        }
+      });
+
+      node
+        .on('mouseenter', (event: MouseEvent, d: any) => {
+          vizTooltip
+            .style('opacity', '1')
+            .style('left', `${event.offsetX + 15}px`)
+            .style('top', `${event.offsetY - 5}px`)
+            .style('white-space', 'normal')
+            .text(d.label);
+        })
+        .on('mousemove', (event: MouseEvent) => {
+          vizTooltip
+            .style('left', `${event.offsetX + 15}px`)
+            .style('top', `${event.offsetY - 5}px`);
+        })
+        .on('mouseleave', () => {
+          vizTooltip.style('opacity', '0');
+        });
+
+      simulation.on('tick', () => {
+        link
+          .attr('x1', (d: any) => d.source?.x ?? 0)
+          .attr('y1', (d: any) => d.source?.y ?? 0)
+          .attr('x2', (d: any) => d.target?.x ?? 0)
+          .attr('y2', (d: any) => d.target?.y ?? 0);
+
+        node.attr('transform', (d: any) => {
+          const x = d.x ?? 0;
+          const y = d.y ?? 0;
+          return `translate(${x},${y})`;
         });
       });
-
-    const vizTooltip = d3.select(vizTooltipRef.current);
-
-    const defs = svg.append('defs');
-    defs.append('clipPath')
-      .attr('id', 'circleClipOverlay')
-      .append('circle')
-      .attr('r', 20)
-      .attr('cx', 0)
-      .attr('cy', 0);
-
-    // Add arrow markers for each relationship type
-    const relationshipColors = ['#4a7c6f', '#8b5c5c', '#5c7a9e', '#7a6b8a', '#8a7a5c', '#64748b'];
-    relationshipColors.forEach((color, i) => {
-      defs.append('marker')
-        .attr('id', `arrow-${i}`)
-        .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 28) // Position arrow at edge of node (nodeRadius + arrow size)
-        .attr('refY', 0)
-        .attr('markerWidth', 6)
-        .attr('markerHeight', 6)
-        .attr('orient', 'auto')
-        .append('path')
-        .attr('fill', color)
-        .attr('d', 'M0,-5L10,0L0,5');
-    });
-
-    // Create a color to marker ID mapping
-    const colorToMarkerId = (color: string) => {
-      const index = relationshipColors.indexOf(color);
-      return index >= 0 ? `arrow-${index}` : 'arrow-5'; // Default to gray
     };
 
-    const link = g.append('g')
-      .selectAll('line')
-      .data(links)
-      .join('line')
-      .attr('stroke', (d: any) => getRelationshipColor(d.relationship))
-      .attr('stroke-opacity', 0.6)
-      .attr('stroke-width', 2)
-      .attr('marker-end', (d: any) => `url(#${colorToMarkerId(getRelationshipColor(d.relationship))})`)
-      .style('cursor', 'pointer')
-      .on('mouseenter', (event: MouseEvent, d: any) => {
-        d3.select(event.target as Element)
-          .attr('stroke-opacity', 1);
-
-        // Show relationship tooltip
-        const sourceLabel = typeof d.source === 'object' ? d.source.label : d.source;
-        const targetLabel = typeof d.target === 'object' ? d.target.label : d.target;
-        const relationship = d.relationship || 'RELATED';
-        const tooltipText = `${relationship}${d.reasoning ? `\n\n${d.reasoning}` : ''}`;
-
-        vizTooltip
-          .style('opacity', '1')
-          .style('left', `${event.offsetX + 15}px`)
-          .style('top', `${event.offsetY - 5}px`)
-          .style('white-space', 'pre-wrap')
-          .html(`<strong style="color: ${getRelationshipColor(d.relationship)}">${relationship}</strong>${d.reasoning ? `<br/><span style="color: #94a3b8; font-size: 10px; margin-top: 4px; display: block;">${d.reasoning}</span>` : ''}`);
-      })
-      .on('mousemove', (event: MouseEvent) => {
-        vizTooltip
-          .style('left', `${event.offsetX + 15}px`)
-          .style('top', `${event.offsetY - 5}px`);
-      })
-      .on('mouseleave', (event: MouseEvent) => {
-        d3.select(event.target as Element)
-          .attr('stroke-opacity', 0.6);
-        vizTooltip.style('opacity', '0');
-      });
-
-    const node = g.append('g')
-      .selectAll('g')
-      .data(nodes)
-      .join('g')
-      .style('cursor', 'grab')
-      .call(d3.drag<any, any>()
-        .on('start', (event, d: any) => {
-          if (!event.active) simulation.alphaTarget(0.3).restart();
-          d.fx = d.x;
-          d.fy = d.y;
-        })
-        .on('drag', (event, d: any) => {
-          d.fx = event.x;
-          d.fy = event.y;
-        })
-        .on('end', (event, d: any) => {
-          if (!event.active) simulation.alphaTarget(0);
-          d.fx = null;
-          d.fy = null;
-        })
-      );
-
-    node.each(function(d: any) {
-      const nodeGroup = d3.select(this);
-      
-      if (d.imageUrl) {
-        nodeGroup.append('image')
-          .attr('href', d.imageUrl)
-          .attr('width', 40)
-          .attr('height', 40)
-          .attr('x', -20)
-          .attr('y', -20)
-          .attr('clip-path', 'url(#circleClipOverlay)')
-          .attr('preserveAspectRatio', 'xMidYMid slice');
-      } else {
-        nodeGroup.append('circle')
-          .attr('r', 18)
-          .attr('fill', '#1e293b')
-          .attr('stroke', '#334155')
-          .attr('stroke-width', 1);
-        
-        nodeGroup.append('text')
-          .text(d.label.substring(0, 2).toUpperCase())
-          .attr('text-anchor', 'middle')
-          .attr('dy', '0.35em')
-          .attr('fill', '#64748b')
-          .attr('font-size', '9px')
-          .attr('font-weight', '500')
-          .attr('pointer-events', 'none');
-      }
-    });
-
-    node
-      .on('mouseenter', (event: MouseEvent, d: any) => {
-        vizTooltip
-          .style('opacity', '1')
-          .style('left', `${event.offsetX + 15}px`)
-          .style('top', `${event.offsetY - 5}px`)
-          .style('white-space', 'normal')
-          .text(d.label);
-      })
-      .on('mousemove', (event: MouseEvent) => {
-        vizTooltip
-          .style('left', `${event.offsetX + 15}px`)
-          .style('top', `${event.offsetY - 5}px`);
-      })
-      .on('mouseleave', () => {
-        vizTooltip.style('opacity', '0');
-      });
-
-    simulation.on('tick', () => {
-      link
-        .attr('x1', (d: any) => d.source?.x ?? 0)
-        .attr('y1', (d: any) => d.source?.y ?? 0)
-        .attr('x2', (d: any) => d.target?.x ?? 0)
-        .attr('y2', (d: any) => d.target?.y ?? 0);
-
-      node.attr('transform', (d: any) => {
-        const x = d.x ?? 0;
-        const y = d.y ?? 0;
-        return `translate(${x},${y})`;
-      });
-    });
+    void renderFullGraph();
 
     return () => {
-      simulation.stop();
+      cancelled = true;
+      simulation?.stop();
     };
   }, [isVisible, isLoading, currentScreen, graphView]);
 
@@ -1749,6 +1858,307 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     </div>
   );
 
+  // Render Bet Summary Screen
+  const renderBetSummaryScreen = () => {
+    const nodes = graphView.nodes;
+    // Calculate allocation based on actual weights - use weight * probability for risk-adjusted sizing
+    const getNodeAllocationWeight = (node: typeof nodes[0]): number => {
+      const weight = node.weight ?? 0;
+      const probability = node.probability ?? 0.5;
+      // Weight by both the dependency weight and expected return (edge)
+      // Higher probability = better odds, weight reflects importance
+      return weight * (1 + Math.abs(probability - 0.5));
+    };
+    const totalWeight = nodes.reduce((sum, node) => sum + getNodeAllocationWeight(node), 0);
+    const sortedNodes = [...nodes].sort((a, b) => getNodeAllocationWeight(b) - getNodeAllocationWeight(a));
+    const getWeightPercentage = (node: typeof nodes[0]): number => {
+      if (!totalWeight || totalWeight === 0) {
+        // Fallback to equal distribution if no weights
+        return nodes.length > 0 ? 100 / nodes.length : 0;
+      }
+      return (getNodeAllocationWeight(node) / totalWeight) * 100;
+    };
+
+    const colors = ['#4a7c6f', '#5c7a9e', '#7a6b8a', '#8a7a5c', '#8b5c5c', '#64748b'];
+    const hoveredAllocationNode = allocationHoveredNode
+      ? sortedNodes.find(n => n.id === allocationHoveredNode)
+      : null;
+
+    return (
+      <div style={{
+        position: 'relative',
+        zIndex: 3,
+        flex: 1,
+        padding: '12px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        overflowY: 'auto',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: '12px',
+          paddingBottom: '12px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button
+              onClick={() => setCurrentScreen('visualize')}
+              onMouseEnter={() => setBetBackHover(true)}
+              onMouseLeave={() => setBetBackHover(false)}
+              style={{
+                ...buttonBase,
+                border: betBackHover ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+                boxShadow: betBackHover ? '0 8px 32px rgba(70, 100, 140, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.15)',
+                filter: betBackHover ? 'brightness(1.25)' : 'brightness(1)',
+              }}
+            >
+              Back
+            </button>
+            <h2 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#f1f5f9' }}>
+              Bet Summary
+            </h2>
+          </div>
+          <span style={{ fontSize: '11px', color: '#64748b' }}>
+            {nodes.length} position{nodes.length !== 1 ? 's' : ''}
+          </span>
+        </div>
+
+        {/* Expected Stats */}
+        {globalsBaseline && (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            style={{
+              padding: '12px 14px',
+              marginBottom: '12px',
+              background: '#1e293b',
+              borderRadius: '8px',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+            }}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase' }}>Expected ROI</span>
+                <span style={{
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: globalsBaseline.roi > 0 ? '#6ee7b7' : globalsBaseline.roi < 0 ? '#fca5a5' : '#f1f5f9'
+                }}>
+                  {(globalsBaseline.roi * 100).toFixed(2)}%
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase' }}>Expected Value</span>
+                <span style={{
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: globalsBaseline.expectedValue > 0 ? '#6ee7b7' : globalsBaseline.expectedValue < 0 ? '#fca5a5' : '#f1f5f9'
+                }}>
+                  {globalsBaseline.expectedValue >= 0 ? '+' : ''}{globalsBaseline.expectedValue.toFixed(2)}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase' }}>Best Case</span>
+                <span style={{ fontSize: '13px', fontWeight: 500, color: '#6ee7b7' }}>
+                  +{globalsBaseline.bestCase.toFixed(2)}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase' }}>Worst Case</span>
+                <span style={{ fontSize: '13px', fontWeight: 500, color: '#fca5a5' }}>
+                  {globalsBaseline.worstCase.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Bets List */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto' }}>
+          {sortedNodes.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b', fontSize: '12px' }}>
+              No bets accepted yet
+            </div>
+          ) : (
+            sortedNodes.map((node, index) => {
+              const weightPct = getWeightPercentage(node);
+              const isHovered = betSummaryHoveredNode === node.id || allocationHoveredNode === node.id;
+              const color = colors[index % colors.length];
+
+              return (
+                <motion.div
+                  key={node.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.2, delay: index * 0.03, ease: 'easeOut' }}
+                  onMouseEnter={() => setBetSummaryHoveredNode(node.id)}
+                  onMouseLeave={() => setBetSummaryHoveredNode(null)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    padding: '10px 12px',
+                    background: isHovered
+                      ? 'linear-gradient(180deg, rgba(61, 79, 99, 0.6) 0%, rgba(42, 58, 74, 0.6) 100%)'
+                      : 'rgba(30, 41, 59, 0.3)',
+                    borderRadius: '8px',
+                    border: isHovered
+                      ? `1px solid ${color}`
+                      : '1px solid rgba(255, 255, 255, 0.05)',
+                    cursor: 'default',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {/* Profile Picture */}
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                      overflow: 'hidden',
+                      background: node.imageUrl ? 'transparent' : 'linear-gradient(135deg, #475569, #334155)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      border: '2px solid rgba(255, 255, 255, 0.1)',
+                    }}
+                    title={node.label}
+                  >
+                    {node.imageUrl ? (
+                      <img
+                        src={node.imageUrl}
+                        alt={node.label}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: '#94a3b8' }}>
+                        {node.label.slice(0, 2).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Title and Info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      color: '#f1f5f9',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: isHovered ? 'normal' : 'nowrap',
+                      lineHeight: 1.4,
+                    }}>
+                      {node.label}
+                    </div>
+                    <div style={{
+                      fontSize: '10px',
+                      color: '#64748b',
+                      marginTop: '2px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}>
+                      <span style={{
+                        color: node.decision === 'yes' ? '#6ee7b7' : '#fca5a5',
+                        fontWeight: 500,
+                      }}>
+                        {node.decision === 'yes' ? 'YES' : 'NO'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Weight */}
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-end',
+                    gap: '2px',
+                    flexShrink: 0,
+                  }}>
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: '#f1f5f9' }}>
+                      {weightPct.toFixed(1)}%
+                    </span>
+                    <span style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                      allocation
+                    </span>
+                  </div>
+                </motion.div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Portfolio Allocation Bar with hover */}
+        {sortedNodes.length > 0 && (
+          <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '8px',
+            }}>
+              <span style={{
+                fontSize: '9px',
+                color: '#64748b',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                fontWeight: 600,
+              }}>
+                Portfolio Allocation
+              </span>
+              {hoveredAllocationNode && (
+                <span style={{
+                  fontSize: '10px',
+                  color: '#f1f5f9',
+                  fontWeight: 500,
+                }}>
+                  {hoveredAllocationNode.label.length > 30
+                    ? hoveredAllocationNode.label.slice(0, 30) + '...'
+                    : hoveredAllocationNode.label}
+                </span>
+              )}
+            </div>
+            <div style={{
+              display: 'flex',
+              height: '12px',
+              borderRadius: '6px',
+              overflow: 'hidden',
+              background: '#1e293b',
+            }}>
+              {sortedNodes.map((node, index) => {
+                const widthPct = getWeightPercentage(node);
+                const color = colors[index % colors.length];
+                const isHovered = allocationHoveredNode === node.id;
+
+                return (
+                  <div
+                    key={node.id}
+                    onMouseEnter={() => setAllocationHoveredNode(node.id)}
+                    onMouseLeave={() => setAllocationHoveredNode(null)}
+                    style={{
+                      width: `${widthPct}%`,
+                      height: '100%',
+                      background: color,
+                      transition: 'all 0.15s ease',
+                      cursor: 'pointer',
+                      opacity: allocationHoveredNode && !isHovered ? 0.4 : 1,
+                      transform: isHovered ? 'scaleY(1.2)' : 'scaleY(1)',
+                    }}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <AnimatePresence mode="wait">
       {isVisible && (
@@ -1928,8 +2338,8 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
               </div>
             </div>
 
-            {/* Navigation (for non-decision/intro screens) */}
-            {currentScreen !== 'decision' && currentScreen !== 'intro' && (
+            {/* Navigation (for visualize screen only) */}
+            {currentScreen === 'visualize' && (
               <div style={{
                 position: 'relative',
                 zIndex: 3,
@@ -1958,22 +2368,20 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setCurrentScreen('add');
+                    setCurrentScreen('bets');
                   }}
-                  onMouseEnter={() => setAddHover(true)}
-                  onMouseLeave={() => setAddHover(false)}
+                  onMouseEnter={() => setBetHover(true)}
+                  onMouseLeave={() => setBetHover(false)}
                   style={{
                     ...buttonBase,
                     padding: '6px 12px',
                     fontSize: '11px',
-                    background: currentScreen === 'add' ? 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)' : addHover ? 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)' : 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)',
-                    color: '#e2e8f0',
-                    border: currentScreen === 'add' || addHover ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
-                    boxShadow: addHover ? '0 8px 32px rgba(70, 100, 140, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.15)',
-                    filter: addHover && currentScreen !== 'add' ? 'brightness(1.25)' : 'brightness(1)',
+                    border: betHover ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+                    boxShadow: betHover ? '0 8px 32px rgba(70, 100, 140, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.15)',
+                    filter: betHover ? 'brightness(1.25)' : 'brightness(1)',
                   }}
                 >
-                  Add
+                  Bet
                 </button>
               </div>
             )}
@@ -2115,6 +2523,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
                 {currentScreen === 'decision' && renderDecisionScreen()}
                 {currentScreen === 'visualize' && renderVisualizationScreen()}
                 {currentScreen === 'add' && renderAddScreen()}
+                {currentScreen === 'bets' && renderBetSummaryScreen()}
               </>
             )}
 

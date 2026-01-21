@@ -1,5 +1,15 @@
 import { useEffect, useRef } from 'react';
-import * as d3 from 'd3';
+import {
+  select,
+  d3Zoom,
+  forceSimulation,
+  forceLink,
+  forceManyBody,
+  forceCenter,
+  forceCollide,
+  drag,
+  type Simulation,
+} from '@/utils/d3-imports';
 import { motion } from 'framer-motion';
 import { GraphData, getRelationshipColor, BetRelationship } from '@/types/graph';
 
@@ -19,9 +29,9 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
     const height = 460;
 
     // Clear previous render
-    d3.select(svgRef.current).selectAll('*').remove();
+    select(svgRef.current).selectAll('*').remove();
 
-    const svg = d3.select(svgRef.current)
+    const svg = select(svgRef.current)
       .attr('width', width)
       .attr('height', height)
       .attr('style', 'background: transparent; overflow: visible;');
@@ -30,7 +40,7 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
     const g = svg.append('g');
 
     // Add zoom behavior
-    const zoom = d3.zoom<SVGSVGElement, unknown>()
+    const zoom = d3Zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
       .on('zoom', (event) => {
         g.attr('transform', event.transform);
@@ -44,11 +54,11 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
 
     // Create force simulation - gentler forces for cleaner layout
     const nodeRadius = 24;
-    const simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).id((d: any) => d.id).distance(80))
-      .force('charge', d3.forceManyBody().strength(-150))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(28))
+    const simulation = forceSimulation(nodes)
+      .force('link', forceLink(links).id((d: any) => d.id).distance(80))
+      .force('charge', forceManyBody().strength(-150))
+      .force('center', forceCenter(width / 2, height / 2))
+      .force('collision', forceCollide().radius(28))
       .force('bounds', () => {
         // Keep nodes within visible bounds
         nodes.forEach((d: any) => {
@@ -58,7 +68,7 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
       });
 
     // Draw links with relationship colors
-    const edgeTooltip = d3.select(edgeTooltipRef.current);
+    const edgeTooltip = select(edgeTooltipRef.current);
     const link = g.append('g')
       .selectAll('line')
       .data(links)
@@ -69,7 +79,7 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
       .style('cursor', 'pointer')
       .on('mouseenter', (event: MouseEvent, d: any) => {
         // Highlight the edge
-        d3.select(event.target as Element)
+        select(event.target as Element)
           .attr('stroke-opacity', 1)
           .attr('stroke-width', 3);
 
@@ -89,7 +99,7 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
       })
       .on('mouseleave', (event: MouseEvent) => {
         // Reset edge style
-        d3.select(event.target as Element)
+        select(event.target as Element)
           .attr('stroke-opacity', 0.6)
           .attr('stroke-width', 2);
         edgeTooltip.style('opacity', '0');
@@ -101,7 +111,7 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
       .data(nodes)
       .join('g')
       .style('cursor', 'grab')
-      .call(d3.drag<any, any>()
+      .call(drag<any, any>()
         .on('start', (event, d: any) => {
           if (!event.active) simulation.alphaTarget(0.3).restart();
           d.fx = d.x;
@@ -127,10 +137,48 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
       .attr('cx', 0)
       .attr('cy', 0);
 
-    // Add market images or fallback circles to nodes
-    node.each(function(d: any) {
-      const nodeGroup = d3.select(this);
-      
+    // Create gradient placeholders for nodes without images
+    const gradientColors = [
+      ['#4a7c6f', '#2d5a4d'], // teal
+      ['#5c7a9e', '#3d5a7a'], // blue
+      ['#7a6b8a', '#5a4d6a'], // purple
+      ['#8a7a5c', '#6a5a3d'], // amber
+      ['#8b5c5c', '#6a3d3d'], // rose
+      ['#6b8a7a', '#4d6a5a'], // sage
+    ];
+
+    // Generate a consistent color index from label
+    const getColorIndex = (label: string) => {
+      let hash = 0;
+      for (let i = 0; i < label.length; i++) {
+        hash = ((hash << 5) - hash) + label.charCodeAt(i);
+        hash = hash & hash;
+      }
+      return Math.abs(hash) % gradientColors.length;
+    };
+
+    // Create gradients for each node
+    nodes.forEach((node: any, i: number) => {
+      const colorIdx = getColorIndex(node.label || node.id);
+      const [color1, color2] = gradientColors[colorIdx];
+      const gradient = defs.append('linearGradient')
+        .attr('id', `popupVizNodeGradient-${i}`)
+        .attr('x1', '0%')
+        .attr('y1', '0%')
+        .attr('x2', '100%')
+        .attr('y2', '100%');
+      gradient.append('stop')
+        .attr('offset', '0%')
+        .attr('stop-color', color1);
+      gradient.append('stop')
+        .attr('offset', '100%')
+        .attr('stop-color', color2);
+    });
+
+    // Add market images or gradient fallback circles to nodes
+    node.each(function(d: any, i: number) {
+      const nodeGroup = select(this);
+
       if (d.imageUrl) {
         // Just the clipped image, no border
         nodeGroup.append('image')
@@ -142,27 +190,27 @@ function VisualizationScreen({ graphData }: VisualizationScreenProps) {
           .attr('clip-path', 'url(#circleClip)')
           .attr('preserveAspectRatio', 'xMidYMid slice');
       } else {
-        // Minimal circle for nodes without images
+        // Gradient circle placeholder with text
         nodeGroup.append('circle')
           .attr('r', 18)
-          .attr('fill', '#1e293b')
-          .attr('stroke', '#334155')
+          .attr('fill', `url(#popupVizNodeGradient-${i})`)
+          .attr('stroke', 'rgba(255, 255, 255, 0.2)')
           .attr('stroke-width', 1);
-        
+
         // Small label inside
         nodeGroup.append('text')
           .text(d.label.substring(0, 2).toUpperCase())
           .attr('text-anchor', 'middle')
           .attr('dy', '0.35em')
-          .attr('fill', '#64748b')
+          .attr('fill', '#ffffff')
           .attr('font-size', '9px')
-          .attr('font-weight', '500')
+          .attr('font-weight', '600')
           .attr('pointer-events', 'none');
       }
     });
 
     // Add hover tooltip events
-    const tooltip = d3.select(tooltipRef.current);
+    const tooltip = select(tooltipRef.current);
     node
       .on('mouseenter', (event: MouseEvent, d: any) => {
         tooltip

@@ -21,6 +21,9 @@ export interface Node {
   url?: string;
   yesPercentage?: number;
   noPercentage?: number;
+  weight?: number;
+  probability?: number;
+  decision?: 'yes' | 'no';
 }
 
 export interface Link {

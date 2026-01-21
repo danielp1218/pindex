@@ -369,6 +369,9 @@ export function graphToGraphData(root: RelationGraphNode): GraphData {
         id: node.id,
         label: node.label ?? node.id,
         imageUrl: node.imageUrl,
+        weight: node.weight,
+        probability: node.probability,
+        decision: node.decision,
       });
       seen.add(node.id);
     }
