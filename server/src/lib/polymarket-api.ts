@@ -2,59 +2,164 @@
 
 import type { PolymarketMarket } from '../types';
 import { logMessage, type Logger } from './logger';
+import { HARDCODED_MARKETS, getDiverseMarkets, type HardcodedMarket } from '../data/hardcoded-markets';
 
 const CLOB_API = 'https://clob.polymarket.com';
 const GAMMA_API = 'https://gamma-api.polymarket.com';
+
+// Flag to control whether to use hardcoded markets or API
+const USE_HARDCODED_MARKETS = true;
 
 export async function fetchMarkets(
   logger?: Logger,
   limit: number = 1000
 ): Promise<PolymarketMarket[]> {
-  // Use Gamma API for active/current markets (much better than CLOB)
   const safeLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
-  const response = await fetch(`${GAMMA_API}/markets?limit=${safeLimit}&closed=false`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch markets: ${response.statusText}`);
+  
+  // Use hardcoded markets for consistent variety
+  if (USE_HARDCODED_MARKETS) {
+    logMessage(logger, 'log', `Using hardcoded markets (${HARDCODED_MARKETS.length} available)`);
+    
+    // Get diverse subset based on requested limit
+    const diverseMarkets = getDiverseMarkets(Math.min(safeLimit, HARDCODED_MARKETS.length));
+    
+    // Convert hardcoded markets to full PolymarketMarket format
+    return diverseMarkets.map((m: HardcodedMarket) => ({
+      ...m,
+      id: m.id,
+      condition_id: m.condition_id,
+      question: m.question,
+      outcomes: ['Yes', 'No'],
+      volume: (Math.random() * 1000000).toFixed(2), // Simulated volume as string
+      liquidity: (Math.random() * 500000).toFixed(2), // Simulated liquidity as string
+    } as PolymarketMarket));
   }
-  const markets = await response.json() as PolymarketMarket[];
+  
+  // Fallback to API (original implementation)
+  try {
+    const response = await fetch(`${GAMMA_API}/markets?limit=${safeLimit}&closed=false`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch markets: ${response.statusText}`);
+    }
+    const markets = await response.json() as PolymarketMarket[];
 
-  // Normalize the data - Gamma API returns markets directly, not in a data field
-  return markets.map(m => ({
-    ...m,
-    // Ensure we have both id and condition_id fields
-    id: m.id || m.condition_id || '',
-    condition_id: m.condition_id || m.id,
-  }));
+    // Normalize the data - Gamma API returns markets directly, not in a data field
+    return markets.map(m => ({
+      ...m,
+      // Ensure we have both id and condition_id fields
+      id: m.id || m.condition_id || '',
+      condition_id: m.condition_id || m.id,
+    }));
+  } catch (error) {
+    logMessage(logger, 'error', 'API fetch failed, using hardcoded markets as fallback', error);
+    
+    // Fallback to hardcoded markets on API failure
+    const diverseMarkets = getDiverseMarkets(Math.min(safeLimit, HARDCODED_MARKETS.length));
+    return diverseMarkets.map((m: HardcodedMarket) => ({
+      ...m,
+      id: m.id,
+      condition_id: m.condition_id,
+      question: m.question,
+      outcomes: ['Yes', 'No'],
+      volume: (Math.random() * 1000000).toFixed(2),
+      liquidity: (Math.random() * 500000).toFixed(2),
+    } as PolymarketMarket));
+  }
 }
 
 export async function fetchMarket(
   id: string,
   logger?: Logger
 ): Promise<PolymarketMarket> {
-  // Try Gamma API first (has more current data)
-  let response = await fetch(`${GAMMA_API}/markets/${id}`);
-
-  // Fall back to CLOB API if not found in Gamma
-  if (!response.ok) {
-    response = await fetch(`${CLOB_API}/markets/${id}`);
+  // Check hardcoded markets first
+  if (USE_HARDCODED_MARKETS) {
+    const hardcodedMarket = HARDCODED_MARKETS.find(
+      m => m.id === id || m.condition_id === id
+    );
+    
+    if (hardcodedMarket) {
+      logMessage(logger, 'log', `Found market ${id} in hardcoded data`);
+      return {
+        ...hardcodedMarket,
+        id: hardcodedMarket.id,
+        condition_id: hardcodedMarket.condition_id,
+        question: hardcodedMarket.question,
+        outcomes: ['Yes', 'No'],
+        volume: (Math.random() * 1000000).toFixed(2),
+        liquidity: (Math.random() * 500000).toFixed(2),
+      } as PolymarketMarket;
+    }
   }
+  
+  // Try API if not found in hardcoded markets
+  try {
+    // Try Gamma API first (has more current data)
+    let response = await fetch(`${GAMMA_API}/markets/${id}`);
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch market: ${response.statusText}`);
+    // Fall back to CLOB API if not found in Gamma
+    if (!response.ok) {
+      response = await fetch(`${CLOB_API}/markets/${id}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch market: ${response.statusText}`);
+    }
+
+    const data = await response.json() as PolymarketMarket;
+    return {
+      ...data,
+      id: data.id || data.condition_id || '',
+      condition_id: data.condition_id || data.id,
+    };
+  } catch (error) {
+    // Final fallback: check hardcoded markets even if USE_HARDCODED_MARKETS is false
+    const hardcodedMarket = HARDCODED_MARKETS.find(
+      m => m.id === id || m.condition_id === id
+    );
+    
+    if (hardcodedMarket) {
+      logMessage(logger, 'log', `API failed, using hardcoded market ${id}`);
+      return {
+        ...hardcodedMarket,
+        id: hardcodedMarket.id,
+        condition_id: hardcodedMarket.condition_id,
+        question: hardcodedMarket.question,
+        outcomes: ['Yes', 'No'],
+        volume: (Math.random() * 1000000).toFixed(2),
+        liquidity: (Math.random() * 500000).toFixed(2),
+      } as PolymarketMarket;
+    }
+    
+    throw error;
   }
-
-  const data = await response.json() as PolymarketMarket;
-  return {
-    ...data,
-    id: data.id || data.condition_id || '',
-    condition_id: data.condition_id || data.id,
-  };
 }
 
 export async function searchMarkets(
   query: string,
   logger?: Logger
 ): Promise<PolymarketMarket[]> {
+  // Use hardcoded markets for search if enabled
+  if (USE_HARDCODED_MARKETS) {
+    const searchResults = HARDCODED_MARKETS.filter(m =>
+      m.question?.toLowerCase().includes(query.toLowerCase()) ||
+      m.description?.toLowerCase().includes(query.toLowerCase()) ||
+      m.category?.toLowerCase().includes(query.toLowerCase())
+    );
+    
+    logMessage(logger, 'log', `Found ${searchResults.length} hardcoded markets matching "${query}"`);
+    
+    return searchResults.map(m => ({
+      ...m,
+      id: m.id,
+      condition_id: m.condition_id,
+      question: m.question,
+      outcomes: ['Yes', 'No'],
+      volume: (Math.random() * 1000000).toFixed(2),
+      liquidity: (Math.random() * 500000).toFixed(2),
+    } as PolymarketMarket));
+  }
+  
+  // Fallback to API search
   const markets = await fetchMarkets(logger);
   return markets.filter(m =>
     m.question?.toLowerCase().includes(query.toLowerCase())
