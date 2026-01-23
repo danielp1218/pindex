@@ -68,12 +68,19 @@ export function computeOutcomeDelta(
   const isAllZeros = Object.values(realDelta).every((v) => Math.abs(v) < 0.001);
   if (isAllZeros && mockWeight && mockWeight > 0) {
     const stake = mockWeight;
+    
+    // Generate random but realistic values for demonstration
+    const expectedValueMultiplier = (Math.random() - 0.5) * 0.3; // -15% to +15%
+    const worstCaseMultiplier = -Math.random() * 1.2 - 0.3; // -30% to -150%  
+    const bestCaseMultiplier = Math.random() * 1.5 + 0.2; // +20% to +170%
+    const roiVariation = (Math.random() - 0.5) * 0.4; // -20% to +20% ROI
+    
     return {
       totalStake: stake,
-      worstCase: -stake,
-      bestCase: stake,
-      expectedValue: stake * 0.08, // ~8% expected positive impact
-      roi: 0.0059, // ~0.59% ROI
+      worstCase: stake * worstCaseMultiplier,
+      bestCase: stake * bestCaseMultiplier,
+      expectedValue: stake * expectedValueMultiplier,
+      roi: Math.max(-0.8, Math.min(0.8, roiVariation)), // Cap ROI between -80% and +80%
     };
   }
 
