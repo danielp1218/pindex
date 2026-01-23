@@ -28,8 +28,18 @@ export function BetsList() {
       <div className="flex flex-col gap-4">
         {bets.map((bet, index) => (
           <div key={index} className="flex items-center gap-3">
-            <div className={`w-10 h-10 ${bet.iconBg} rounded-xl flex items-center justify-center text-lg flex-shrink-0`}>
-              {bet.icon}
+            <div className={`w-10 h-10 ${bet.iconBg} rounded-xl flex items-center justify-center text-lg flex-shrink-0 overflow-hidden`}>
+              {bet.icon?.startsWith('http') ? (
+                <Image
+                  src={bet.icon}
+                  alt={bet.question}
+                  width={40}
+                  height={40}
+                  className="w-full h-full object-cover rounded-xl"
+                />
+              ) : (
+                bet.icon
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm text-white truncate">{bet.question}</div>

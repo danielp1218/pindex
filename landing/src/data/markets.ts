@@ -10,7 +10,53 @@ export interface Market {
   logo?: string;
 }
 
-// Category icons and colors
+// Polymarket images for different market categories and topics
+const POLYMARKET_IMAGES = [
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/presidential-election-winner-2024-afdda358-219d-448a-abb5-ba4d14118d71.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/will-trump-acquire-greenland-in-2025-5ZDkcIGhdBMW.jpg',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/who-will-trump-nominate-as-fed-chair-9p19ttRwsbKL.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/trump-invokes-the-insurrection-act-before-august-jR3s2WWoaIbY.jpg',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/us-strikes-iran-by-october-3-2sVnIHq3sjqF.jpg',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/russia-x-ukraine-ceasefire-in-2025-w2voYOygx80B.jpg',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/bitcoin-100k-2024-vRtbPqWsZxYm.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/ethereum-10k-2025-aKlMnOpQrStU.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/spacex-starship-success-2025-bLmNoPqRsTuV.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/tesla-stock-500-2025-cMnOpQrStUvW.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/china-taiwan-2027-dNoPqRsTuVwX.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/us-recession-2025-eOpQrStUvWxY.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/will-ai-replace-50-of-jobs-by-2030-oQd9EHfQRbgL.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/openai-valuation-2025-sIuXbqFmQdwL.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/which-company-has-best-ai-model-end-of-september-MmASwbTkwKHi.jpg',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/openai-ipo-by-qeh3ouQDANVw.jpg',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/anthropic-ipo-closing-market-cap-jdfele1g0krx.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/grok-4pt20-released-by-FREAnoCYA7aN.jpg',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/will-elon-musk-win-his-case-against-sam-altman-3b7rjuMNHGHy.jpg',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/tesla-launches-unsupervised-full-self-driving-fsd-by-june-30-yvpjn3RX4Q2w.jpg',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/largest-company-eoy-KS99l6lbxfCc.jpg',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/BTC+fullsize.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/portugal-presidential-election-_h_A97vllNOX.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/democrats+2028+donkey.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/republicans+2028.png',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/ETH+fullsize.jpg',
+  'https://polymarket-upload.s3.us-east-2.amazonaws.com/SOL-logo.png'
+];
+
+// Background colors pool
+const BG_COLORS = [
+  'bg-blue-600', 'bg-purple-600', 'bg-pink-600', 'bg-red-600', 'bg-orange-500',
+  'bg-yellow-500', 'bg-green-600', 'bg-emerald-600', 'bg-teal-600', 'bg-cyan-600',
+  'bg-sky-600', 'bg-indigo-600', 'bg-violet-600', 'bg-fuchsia-600', 'bg-rose-600'
+];
+
+// Function to get random Polymarket image and color
+function getRandomImageStyle(): { icon: string; iconBg: string } {
+  const icon = POLYMARKET_IMAGES[Math.floor(Math.random() * POLYMARKET_IMAGES.length)];
+  const iconBg = BG_COLORS[Math.floor(Math.random() * BG_COLORS.length)];
+  return { icon, iconBg };
+}
+
+// Category icons and colors (fallback)
 export const CATEGORY_STYLES: Record<string, { icon: string; iconBg: string }> = {
   'Politics': { icon: '🗳️', iconBg: 'bg-blue-600' },
   'Crypto': { icon: '₿', iconBg: 'bg-orange-500' },
@@ -154,14 +200,14 @@ export function getRandomMarkets(count: number = 10): Market[] {
       ? `+$${value.toLocaleString()}.00`
       : `-$${value.toLocaleString()}.00`;
     
-    const categoryStyle = CATEGORY_STYLES[market.category || 'World Events'];
+    const randomStyle = getRandomImageStyle();
     
     return {
       ...market,
       value: formattedValue,
       positive,
-      icon: categoryStyle.icon,
-      iconBg: categoryStyle.iconBg
+      icon: randomStyle.icon,
+      iconBg: randomStyle.iconBg
     };
   });
 }
@@ -177,14 +223,14 @@ export function getMarketsByCategory(category: string, count: number = 5): Marke
       ? `+$${value.toLocaleString()}.00`
       : `-$${value.toLocaleString()}.00`;
     
-    const categoryStyle = CATEGORY_STYLES[market.category || 'World Events'];
+    const randomStyle = getRandomImageStyle();
     
     return {
       ...market,
       value: formattedValue,
       positive,
-      icon: categoryStyle.icon,
-      iconBg: categoryStyle.iconBg
+      icon: randomStyle.icon,
+      iconBg: randomStyle.iconBg
     };
   });
 }
