@@ -12,7 +12,7 @@ const USE_HARDCODED_MARKETS = true;
 
 export async function fetchMarkets(
   logger?: Logger,
-  limit: number = 1000
+  limit: number = 50
 ): Promise<PolymarketMarket[]> {
   const safeLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
   

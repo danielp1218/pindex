@@ -1379,7 +1379,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
             />
           </div>
           
-          {miniGraphData && (
+          {miniGraphData ? (
             <>
               <div style={{
                 display: 'flex',
@@ -1462,6 +1462,15 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
                   </div>
                 )}
               </>
+            ) : (
+              <div style={{
+                textAlign: 'center',
+                padding: '16px',
+                color: '#64748b',
+                fontSize: '10px',
+              }}>
+                Building dependency graph...
+              </div>
             )}
         </div>
       </div>
@@ -1487,7 +1496,10 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       )}
 
       {/* Impact Summary */}
-      <div>
+      <div style={{
+        paddingTop: '12px',
+        paddingBottom: '12px',
+      }}>
         <div style={{
           fontSize: '9px',
           color: '#64748b',

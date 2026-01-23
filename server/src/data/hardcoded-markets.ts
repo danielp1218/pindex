@@ -1082,7 +1082,7 @@ export function shuffleArray<T>(array: T[]): T[] {
 }
 
 // Helper function to get diverse subset
-export function getDiverseMarkets(count: number = 10): HardcodedMarket[] {
+export function getDiverseMarkets(count: number = 50): HardcodedMarket[] {
   // Always include first 10 high-profile markets
   const highProfile = HARDCODED_MARKETS.slice(0, 15);
   
