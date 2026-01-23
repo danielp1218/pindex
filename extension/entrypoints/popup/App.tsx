@@ -432,7 +432,9 @@ function App() {
 
         setGlobalsBaseline(baseline);
         setGlobalsCandidate(candidate ?? baseline);
-        setGlobalsDelta(queuedItem && candidate ? computeOutcomeDelta(baseline, candidate) : null);
+        // Pass weight for mock calculations when API returns zero delta
+        const mockWeight = queuedItem?.weight ?? 1;
+        setGlobalsDelta(queuedItem && candidate ? computeOutcomeDelta(baseline, candidate, mockWeight) : null);
       } catch (error) {
         if (!isActive) {
           return;

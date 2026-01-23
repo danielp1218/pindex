@@ -334,8 +334,7 @@ export default function DecisionScreen({
       display: 'flex',
       flexDirection: 'column',
       position: 'relative',
-      overflowY: 'auto',
-      overflowX: 'hidden',
+      overflow: 'hidden',
     }}>
       {/* Header */}
       <div style={{
@@ -436,7 +435,15 @@ export default function DecisionScreen({
         padding: '0 16px 12px 16px',
         position: 'relative',
         zIndex: 10,
+        overflow: 'hidden',
       }}>
+        {/* Scrollable Content Area - Fixed height to keep buttons in place */}
+        <div style={{
+          flex: 1,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          minHeight: 0,
+        }}>
         {/* Chain Dependency - Mini Graph (matching VisualizationScreen style) */}
         <div>
           <div style={{
@@ -527,19 +534,6 @@ export default function DecisionScreen({
                   </div>
                 )}
               </>
-            )}
-            {!miniGraphData && (
-              <div style={{
-                marginTop: '8px',
-                paddingTop: '8px',
-                borderTop: '1px solid rgba(51, 65, 85, 0.3)',
-                fontSize: '10px',
-                color: '#64748b',
-                lineHeight: 1.4,
-                textAlign: 'center',
-              }}>
-                No queued dependencies yet
-              </div>
             )}
           </div>
         </div>
@@ -640,37 +634,14 @@ export default function DecisionScreen({
           </div>
                   ))}
         </div>
-                {globalsBaseline && globalsCandidate && (
-              <div style={{
-                    marginTop: '8px', 
-                    paddingTop: '8px', 
-                    borderTop: '1px solid rgba(51, 65, 85, 0.3)',
-                    fontSize: '10px', 
-                    color: '#64748b',
-                    lineHeight: 1.4,
-                  }}>
-                    Accept EV: {formatNumber(globalsCandidate.expectedValue)} | Reject EV: {formatNumber(globalsBaseline.expectedValue)}
-                    <br />
-                    Accept ROI: {formatPercent(globalsCandidate.roi)} | Reject ROI: {formatPercent(globalsBaseline.roi)}
-                  </div>
-                )}
               </>
-            )}
-            {!globalsLoading && !globalsError && !globalsDelta && (
-              <p style={{ 
-                margin: 0, 
-                fontSize: '11px', 
-                color: '#64748b', 
-                lineHeight: 1.5,
-              }}>
-                No queued dependency to compare yet.
-              </p>
             )}
           </motion.div>
               </div>
+        </div>
 
-        {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '12px' }}>
+        {/* Action Buttons - Fixed at bottom */}
+        <div style={{ display: 'flex', gap: '8px', paddingTop: '12px', flexShrink: 0 }}>
           <button
             onMouseEnter={() => setAcceptBtnHover(true)}
             onMouseLeave={() => setAcceptBtnHover(false)}

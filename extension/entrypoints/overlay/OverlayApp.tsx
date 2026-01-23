@@ -72,16 +72,14 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
   const [eventImageUrl, setEventImageUrl] = useState<string | null>(null);
   const [eventTitle, setEventTitle] = useState('Market Decision');
   const [accepted, setAccepted] = useState<boolean | null>(null);
-  const [riskLevel, setRiskLevel] = useState(50);
-  
+
   // Add screen state - moved to top level to prevent re-render issues
   const [newNodeLabel, setNewNodeLabel] = useState('');
-  
+
   // Hover states
   const [viewNodesHover, setViewNodesHover] = useState(false);
   const [acceptBtnHover, setAcceptBtnHover] = useState(false);
   const [rejectBtnHover, setRejectBtnHover] = useState(false);
-  const [riskHover, setRiskHover] = useState(false);
   const [closeHover, setCloseHover] = useState(false);
   const [backHover, setBackHover] = useState(false);
   const [addHover, setAddHover] = useState(false);
@@ -336,7 +334,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
             keep: true, // Accept the root decision
             fallbackDecision: rootDecision,
             fallbackWeight: 1,
-            risk: riskLevel,
+            risk: 50,
           });
 
           if (isActive) {
@@ -620,8 +618,8 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
 
         setGlobalsBaseline(baseline);
         setGlobalsCandidate(candidate ?? baseline);
-        // Pass weight for mock calculations when API returns zero delta (sample dependencies)
-        const mockWeight = queuedItem?.id?.startsWith('sample-') ? queuedItem.weight : undefined;
+        // Pass weight for mock calculations when API returns zero delta
+        const mockWeight = queuedItem?.weight ?? 1;
         setGlobalsDelta(queuedItem && candidate ? computeOutcomeDelta(baseline, candidate, mockWeight) : null);
       } catch (error) {
         if (!isActive) {
@@ -1295,7 +1293,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
         keep: accept,
         fallbackDecision: selectedItem?.decision ?? rootDecision,
         fallbackWeight: selectedItem?.weight ?? 1,
-        risk: riskLevel,
+        risk: 50,
       });
 
       setDependencyQueue(result.queue);
@@ -1334,54 +1332,15 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       flexDirection: 'column',
       gap: '10px',
       padding: '12px 16px',
-      overflowY: 'auto',
+      overflow: 'hidden',
     }}>
-      {/* Risk Slider */}
-      <div>
-        <div style={{
-          fontSize: '9px',
-          color: '#64748b',
-          textTransform: 'uppercase',
-          letterSpacing: '0.5px',
-          marginBottom: '6px',
-          fontWeight: 600,
-        }}>Risk</div>
-        <div
-          onMouseEnter={() => setRiskHover(true)}
-          onMouseLeave={() => setRiskHover(false)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            background: 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)',
-            color: '#e2e8f0',
-            padding: '8px 12px',
-            borderRadius: '8px',
-            border: riskHover ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
-            boxShadow: riskHover ? '0 8px 24px rgba(70, 100, 140, 0.25)' : '0 2px 8px rgba(0, 0, 0, 0.15)',
-            transition: 'all 0.2s ease',
-            filter: riskHover ? 'brightness(1.2)' : 'brightness(1)',
-          }}
-        >
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={riskLevel}
-            onChange={(e) => setRiskLevel(Number(e.target.value))}
-            style={{
-              flex: 1,
-              cursor: 'pointer',
-              accentColor: '#5a7a94',
-            }}
-          />
-          <span style={{ fontSize: '11px', fontWeight: 600, color: '#e2e8f0', minWidth: '32px', textAlign: 'right' }}>
-            {Math.round(riskLevel)}
-          </span>
-        </div>
-      </div>
-
+      {/* Scrollable Content Area - Fixed height to keep buttons in place */}
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        minHeight: 0,
+      }}>
       {/* Chain Dependency - Mini Graph */}
       <div>
         <div style={{
@@ -1504,19 +1463,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
                 )}
               </>
             )}
-            {!miniGraphData && (
-              <div style={{
-                marginTop: '8px',
-                paddingTop: '8px',
-                borderTop: '1px solid rgba(51, 65, 85, 0.3)',
-                fontSize: '10px',
-                color: '#64748b',
-              lineHeight: 1.4,
-              textAlign: 'center',
-            }}>
-              No queued dependencies yet
-            </div>
-          )}
         </div>
       </div>
 
@@ -1616,37 +1562,14 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
                   </div>
                 ))}
               </div>
-              {globalsBaseline && globalsCandidate && (
-                <div style={{ 
-                  marginTop: '8px', 
-                  paddingTop: '8px', 
-                  borderTop: '1px solid rgba(51, 65, 85, 0.3)',
-                  fontSize: '10px', 
-                  color: '#64748b',
-                  lineHeight: 1.4,
-                }}>
-                  Accept EV: {formatNumber(globalsCandidate.expectedValue)} | Reject EV: {formatNumber(globalsBaseline.expectedValue)}
-                  <br />
-                  Accept ROI: {formatPercent(globalsCandidate.roi)} | Reject ROI: {formatPercent(globalsBaseline.roi)}
-                </div>
-              )}
             </>
-          )}
-          {!globalsLoading && !globalsError && !globalsDelta && (
-            <p style={{ 
-              margin: 0, 
-              fontSize: '11px', 
-              color: '#64748b', 
-              lineHeight: 1.5,
-            }}>
-              No queued dependency to compare yet.
-            </p>
           )}
         </motion.div>
       </div>
+      </div>
 
-      {/* Action Buttons */}
-      <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '8px' }}>
+      {/* Action Buttons - Fixed at bottom */}
+      <div style={{ display: 'flex', gap: '8px', paddingTop: '8px', flexShrink: 0 }}>
         <button
           onMouseEnter={() => setAcceptBtnHover(true)}
           onMouseLeave={() => setAcceptBtnHover(false)}
