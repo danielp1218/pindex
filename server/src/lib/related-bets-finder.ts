@@ -404,15 +404,26 @@ export async function* findRelatedBets(
   visitedSlugs: string[] = [],
   c: Context,
   logger?: Logger,
-  options: { maxResults?: number; minResults?: number } = {}
+  options: { maxResults?: number; minResults?: number; timeoutMs?: number } = {}
 ): AsyncGenerator<FoundRelatedBet> {
   const requestedMax = options.maxResults ?? 4;
   const requestedMin = options.minResults ?? 3;
   const MAX_RESULTS = Math.max(1, Math.floor(requestedMax)); // Maximum number of related bets to return
   const MIN_RESULTS = Math.max(0, Math.min(MAX_RESULTS, Math.floor(requestedMin))); // Minimum target
+  const TIMEOUT_MS = options.timeoutMs ?? 60000; // 1 minute default timeout
+  const startTime = Date.now();
   let foundCount = 0;
+  let timedOut = false;
   const EVENT_MARKETS_CONCURRENCY = 4;
   const LLM_BATCH_CONCURRENCY = 2;
+
+  const checkTimeout = () => {
+    if (Date.now() - startTime > TIMEOUT_MS) {
+      timedOut = true;
+      return true;
+    }
+    return false;
+  };
 
   // New workflow: Generate keywords → Search events → LLM selects events → Fetch markets
   let eventMarkets: any[] = [];
@@ -706,6 +717,15 @@ Description: ${m.description?.substring(0, 150)}...`;
   };
 
   for (let i = 0; i < batches.length; i += LLM_BATCH_CONCURRENCY) {
+    if (checkTimeout()) {
+      logMessage(
+        logger,
+        'warn',
+        `Search timed out after ${TIMEOUT_MS / 1000}s - could not find any more related markets`
+      );
+      break;
+    }
+
     if (foundCount >= MAX_RESULTS) {
       logMessage(
         logger,
@@ -747,5 +767,13 @@ Description: ${m.description?.substring(0, 150)}...`;
         }
       }
     }
+  }
+
+  if (timedOut && foundCount === 0) {
+    logMessage(
+      logger,
+      'warn',
+      'Could not find any related markets within the time limit'
+    );
   }
 }

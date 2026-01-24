@@ -32,7 +32,7 @@ export default defineConfig({
     },
     web_accessible_resources: [
       {
-        resources: ['0117.mp4'],
+        resources: ['0117.mp4', 'content-scripts/*.css'],
         matches: ['<all_urls>'],
       },
     ],

@@ -23,12 +23,12 @@ import {
 } from '@/utils/globalsApi';
 import { fetchEventInfoFromUrl, type PolymarketEventInfo } from '@/utils/polymarketClient';
 import DecisionScreen from './DecisionScreen.tsx';
-import AddNodesScreen from './AddNodesScreen.tsx';
+import FundScreen from './FundScreen.tsx';
 import VisualizationScreen from './VisualizationScreen.tsx';
 import IntroScreen from './IntroScreen.tsx';
 import { VideoLoader } from '../overlay/VideoLoader';
 
-type Screen = 'intro' | 'decision' | 'add' | 'visualize';
+type Screen = 'intro' | 'decision' | 'fund' | 'visualize';
 
 function findNodeById(node: RelationGraphNode, id: string): RelationGraphNode | null {
   if (node.id === id) {
@@ -64,7 +64,7 @@ function App() {
   const [globalsLoading, setGlobalsLoading] = useState(false);
   const [backHover, setBackHover] = useState(false);
   const [graphHover, setGraphHover] = useState(false);
-  const [addHover, setAddHover] = useState(false);
+  const [fundHover, setFundHover] = useState(false);
   const imageFetchRef = useRef(new Set<string>());
 
   const rootId = useMemo(
@@ -527,22 +527,7 @@ function App() {
     window.close();
   };
 
-  // Show VideoLoader only when user has started (clicked "Start Pindex")
-  if (loading && hasStarted) {
-    return (
-      <div style={{ 
-        minWidth: '420px', 
-        minHeight: '600px', 
-        background: 'linear-gradient(145deg, #0f1520 0%, #0a0e16 50%, #080c12 100%)', 
-        color: '#e2e8f0', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center' 
-      }}>
-        <VideoLoader size={200} />
-      </div>
-    );
-  }
+  // No longer block UI with loading screen - let user view nodes while loading runs in background
 
   // Show intro screen when we have pageUrl but user hasn't started yet
   // This takes priority over the loading state
@@ -643,13 +628,30 @@ function App() {
           background: '#0a0f1a',
           color: '#e2e8f0',
           display: 'flex',
+          flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
           fontFamily: 'Inter, system-ui, sans-serif',
+          gap: '16px',
         }}>
           <span style={{ fontSize: '13px', color: '#94a3b8', letterSpacing: '0.4px' }}>
-            calculating...
+            Searching for related markets...
           </span>
+          <button
+            onClick={() => setCurrentScreen('visualize')}
+            style={{
+              background: 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)',
+              color: '#e2e8f0',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              padding: '8px 16px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 500,
+            }}
+          >
+            View Nodes
+          </button>
         </div>
       );
     }
@@ -725,34 +727,41 @@ function App() {
           Graph
         </button>
         <button
-          onClick={() => setCurrentScreen('add')}
-          onMouseEnter={() => setAddHover(true)}
-          onMouseLeave={() => setAddHover(false)}
+          onClick={() => setCurrentScreen('fund')}
+          onMouseEnter={() => setFundHover(true)}
+          onMouseLeave={() => setFundHover(false)}
           style={{
-            background: 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)',
-            color: '#e2e8f0',
-            border: addHover ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+            background: currentScreen === 'fund'
+              ? 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)'
+              : fundHover
+                ? 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)'
+                : 'transparent',
+            color: currentScreen === 'fund' || fundHover ? '#e2e8f0' : '#64748b',
+            border: currentScreen === 'fund' || fundHover
+              ? '1px solid rgba(255, 255, 255, 0.3)'
+              : '1px solid transparent',
             padding: '6px 12px',
             borderRadius: '8px',
             cursor: 'pointer',
             fontSize: '11px',
             fontWeight: 500,
             transition: 'all 0.2s ease',
-            boxShadow: addHover ? '0 8px 32px rgba(70, 100, 140, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.15)',
-            filter: addHover ? 'brightness(1.25)' : 'brightness(1)',
+            boxShadow: fundHover ? '0 8px 32px rgba(70, 100, 140, 0.3)' : currentScreen === 'fund' ? '0 2px 8px rgba(0, 0, 0, 0.15)' : 'none',
+            filter: fundHover && currentScreen !== 'fund' ? 'brightness(1.25)' : 'brightness(1)',
           }}
         >
-          Add
+          View Fund
         </button>
       </div>
       
       {currentScreen === 'visualize' ? (
         <VisualizationScreen graphData={graphView} />
       ) : (
-        <AddNodesScreen
+        <FundScreen
           relationGraph={relationGraph ?? createRootGraph({ url: pageUrl ?? 'root' })}
-          onGraphUpdate={saveGraphData}
-          marketImageUrl={eventImageUrl || marketImageUrl || profileImage}
+          globalsResult={globalsBaseline}
+          globalsLoading={globalsLoading}
+          globalsError={globalsError}
         />
       )}
     </div>

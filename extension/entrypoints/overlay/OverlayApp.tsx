@@ -7,7 +7,6 @@ import { getDependencyState, getEventIdFromUrl, type DependencyQueueItem } from 
 import { processDependencyDecisionInBackground } from '@/utils/dependencyWorker';
 import type { RelationGraphNode } from '@/types/relationGraph';
 import {
-  addChildNode,
   addQueueItemToGraph,
   createRootGraph,
   flattenGraph,
@@ -25,6 +24,7 @@ import {
   type GraphOutcomeDelta,
 } from '@/utils/globalsApi';
 import { fetchEventInfoFromUrl } from '@/utils/polymarketClient';
+import FundScreen from '../popup/FundScreen';
 
 interface OverlayAppProps {
   isVisible: boolean;
@@ -32,7 +32,7 @@ interface OverlayAppProps {
   profileImage?: string | null;
 }
 
-type Screen = 'intro' | 'decision' | 'visualize' | 'add';
+type Screen = 'intro' | 'decision' | 'visualize' | 'fund';
 
 function findNodeById(node: RelationGraphNode, id: string): RelationGraphNode | null {
   if (node.id === id) {
@@ -47,7 +47,6 @@ function findNodeById(node: RelationGraphNode, id: string): RelationGraphNode | 
   return null;
 }
 
-// Reusable button styles matching landing page
 const buttonBase: React.CSSProperties = {
   padding: '6px 12px',
   borderRadius: '7px',
@@ -71,19 +70,14 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
   const [eventTitle, setEventTitle] = useState('Market Decision');
   const [accepted, setAccepted] = useState<boolean | null>(null);
   const [riskLevel, setRiskLevel] = useState(50);
-  
-  // Add screen state - moved to top level to prevent re-render issues
-  const [newNodeLabel, setNewNodeLabel] = useState('');
-  
-  // Hover states
+
   const [viewNodesHover, setViewNodesHover] = useState(false);
   const [acceptBtnHover, setAcceptBtnHover] = useState(false);
   const [rejectBtnHover, setRejectBtnHover] = useState(false);
   const [riskHover, setRiskHover] = useState(false);
   const [closeHover, setCloseHover] = useState(false);
   const [backHover, setBackHover] = useState(false);
-  const [addHover, setAddHover] = useState(false);
-  const [addBtnHover, setAddBtnHover] = useState(false);
+  const [fundHover, setFundHover] = useState(false);
   const [startHover, setStartHover] = useState(false);
   const [notNowHover, setNotNowHover] = useState(false);
 
@@ -106,7 +100,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
   const overlayRef = useRef<HTMLDivElement>(null);
   const imageFetchRef = useRef(new Set<string>());
 
-  // Get current page URL for API
   const currentUrl = useMemo(() => {
     if (typeof window !== 'undefined' && window.location.pathname.startsWith('/event/')) {
       return window.location.href;
@@ -142,11 +135,9 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
   const displayItem = queuedItem ?? rootFallbackItem;
   const showUserSelection = Boolean(rootFallbackItem && !queuedItem);
   const decisionTitle = displayItem?.question ?? eventTitle;
-  
-  // Show loader until we have FULL dependency data (with explanation/source), not just root fallback
+
   const hasFullDependencyData = queuedItem && (queuedItem.explanation || queuedItem.sourceQuestion);
   const showLoader = isLoading || isProcessingDecision || (currentScreen === 'decision' && !hasFullDependencyData && !hasVisitedRoot);
-  const queueEmpty = currentScreen === 'decision' && !displayItem && hasVisitedRoot;
   const decisionDisabled = isProcessingDecision || !displayItem || !relationGraph;
   const hasDecisionTarget = Boolean(displayItem);
 
@@ -228,7 +219,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     setAccepted(null);
   }, [displayItem?.id]);
 
-  // Reset state when overlay opens - always show intro screen first
   useEffect(() => {
     if (isVisible) {
       setHasStarted(false);
@@ -238,14 +228,12 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     }
   }, [isVisible]);
 
-  // Update profile image when prop changes
   useEffect(() => {
     if (initialProfileImage) {
       setProfileImage(initialProfileImage);
     }
   }, [initialProfileImage]);
 
-  // Extract event info from URL (basic info for intro screen)
   useEffect(() => {
     if (!isVisible || !currentUrl) {
       return;
@@ -255,7 +243,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     const title = slug.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()) || 'Market';
     setEventTitle(title);
 
-    // Get user selection from storage
     (async () => {
       try {
         const stored = await browser.storage.local.get(['lastUserSelection', 'selectionTimestamp']);
@@ -271,7 +258,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     })();
   }, [isVisible, currentUrl]);
 
-  // Load relation graph only after user starts, then auto-accept root decision
   useEffect(() => {
     if (!isVisible || !hasStarted || !currentUrl) {
       return;
@@ -279,13 +265,8 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
 
     let isActive = true;
 
-    const loadGraphAndProcessRoot = async () => {
-      // Stay on loading screen (don't change currentScreen yet)
+    const loadGraphAndProcess = async () => {
       setIsLoading(true);
-      
-      // Track start time for minimum loading duration
-      const startTime = Date.now();
-      const MIN_LOADING_TIME = 4000; // Minimum 4 seconds of loading animation
 
       let loadedGraph: RelationGraphNode | null = null;
 
@@ -313,103 +294,40 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
         await saveRelationGraph(currentUrl, loadedGraph);
       }
 
-      // After graph loads, automatically accept the root decision and search for dependencies
       if (isActive && loadedGraph) {
         try {
-          // Small delay to ensure queue state is initialized
-          await new Promise(resolve => setTimeout(resolve, 100));
-          
-          // Get the root fallback item (the current market)
-          const rootDecision = userSelection ?? 'yes';
-          
-          // Process the root decision as accepted to start dependency search
           const result = await processDependencyDecisionInBackground({
             eventUrl: currentUrl,
-            keep: true, // Accept the root decision
-            fallbackDecision: rootDecision,
+            keep: true,
+            fallbackDecision: userSelection ?? 'yes',
             fallbackWeight: 1,
             risk: riskLevel,
           });
 
           if (isActive) {
-            // Check if we have actual dependency data with full details (explanation, source, etc.)
-            const firstItem = result.queue[0];
-            const hasFullData = firstItem && (firstItem.explanation || firstItem.sourceQuestion);
-            
-            if (hasFullData) {
-              // We have full dependency data! Update state and show decision screen
-              setDependencyQueue(result.queue);
-              setDependencyVisited(result.visited);
-              
-              // Wait for state to be applied
-              await new Promise(resolve => setTimeout(resolve, 100));
-              
-              // Ensure minimum loading time
-              const elapsed = Date.now() - startTime;
-              if (elapsed < MIN_LOADING_TIME) {
-                await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed));
-              }
-              
-              setIsLoading(false);
-              setCurrentScreen('decision');
-            } else if (result.queue.length > 0) {
-              // We have queue items but not full data - update queue but keep loading
-              // This shouldn't normally happen, but handle it gracefully
-              setDependencyQueue(result.queue);
-              setDependencyVisited(result.visited);
-              
-              const elapsed = Date.now() - startTime;
-              if (elapsed < MIN_LOADING_TIME) {
-                await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed));
-              }
-              
-              setIsLoading(false);
-              setCurrentScreen('decision');
-            } else {
-              // No dependencies found - show root fallback after minimum time
-              setDependencyVisited(result.visited);
-              
-              const elapsed = Date.now() - startTime;
-              if (elapsed < MIN_LOADING_TIME) {
-                await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed));
-              }
-              
-              setIsLoading(false);
-              setCurrentScreen('decision');
-            }
+            setDependencyQueue(result.queue);
+            setDependencyVisited(result.visited);
+            setIsLoading(false);
+            setCurrentScreen('decision');
           }
         } catch (error) {
           console.error('Error processing root decision:', error);
-          // On error, keep loading longer then show what we have
           if (isActive) {
-            const elapsed = Date.now() - startTime;
-            const errorWaitTime = Math.max(MIN_LOADING_TIME, 5000); // Wait at least 5 seconds on error
-            if (elapsed < errorWaitTime) {
-              await new Promise(resolve => setTimeout(resolve, errorWaitTime - elapsed));
-            }
             setIsLoading(false);
             setCurrentScreen('decision');
           }
         }
       } else if (isActive) {
-        // If graph didn't load, ensure minimum loading time
-        const elapsed = Date.now() - startTime;
-        if (elapsed < MIN_LOADING_TIME) {
-          await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed));
-        }
         setIsLoading(false);
         setCurrentScreen('decision');
       }
     };
 
-    void loadGraphAndProcessRoot();
+    void loadGraphAndProcess();
     return () => {
       isActive = false;
     };
-  // Note: eventImageUrl and profileImage removed from deps to prevent race condition
-  // when accepting nodes. Root metadata is updated by separate effect.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isVisible, hasStarted, currentUrl]);
+  }, [isVisible, hasStarted, currentUrl, eventTitle, eventImageUrl, profileImage, userSelection, riskLevel]);
 
   useEffect(() => {
     if (!currentUrl) {
@@ -521,10 +439,8 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     };
   }, [currentUrl, relationGraph]);
 
-  // Fetch image for current displayItem if missing
   useEffect(() => {
     if (!displayItem?.url || displayItem.imageUrl) {
-      // Reset if no displayItem or already has image
       if (!displayItem) {
         setDisplayItemImage(null);
       }
@@ -547,7 +463,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     };
   }, [displayItem?.id, displayItem?.url, displayItem?.imageUrl]);
 
-  // Fetch image for source node if missing
   useEffect(() => {
     const sourceUrl = displayItem?.sourceUrl || displayItem?.parentUrl;
     if (!sourceUrl) {
@@ -555,13 +470,12 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       return;
     }
 
-    // Check if we already have the image from the relation graph
     const sourceNode = displayItem?.parentId && relationGraph
       ? findNodeById(relationGraph, displayItem.parentId)
       : relationGraph;
 
     if (sourceNode?.imageUrl) {
-      setSourceItemImage(null); // Use graph's image
+      setSourceItemImage(null);
       return;
     }
 
@@ -637,13 +551,11 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     };
   }, [relationGraph, queuedItem]);
 
-  // D3 Mini Graph Effect (for decision screen)
   useEffect(() => {
     if (!isVisible || isLoading || currentScreen !== 'decision' || !miniGraphData) return;
 
     let simulation: d3.Simulation<any, undefined> | null = null;
 
-    // Small delay to ensure DOM is mounted after loading completes
     const timeoutId = setTimeout(() => {
       if (!svgRef.current) return;
 
@@ -684,7 +596,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
         .force('link', d3.forceLink(links).distance(200))
         .alphaDecay(0.05);
 
-      // Add defs for clip path and arrow markers
       const defs = svg.append('defs');
       defs.append('clipPath')
         .attr('id', 'miniCircleClip')
@@ -693,7 +604,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
         .attr('cx', 0)
         .attr('cy', 0);
 
-      // Add arrow markers for each relationship color in mini graph
       const miniColors = ['#4a7c6f', '#8b5c5c', '#5c7a9e', '#7a6b8a', '#8a7a5c', '#64748b'];
       miniColors.forEach((color, i) => {
         defs.append('marker')
@@ -714,7 +624,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
         return index >= 0 ? `mini-arrow-${index}` : 'mini-arrow-5';
       };
 
-      // Draw link with relationship color and arrow
       const link = g.append('g')
         .selectAll('line')
         .data(links)
@@ -746,12 +655,10 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
           })
         );
 
-      // Render nodes with images if available, otherwise circle with text
       node.each(function(d: any) {
         const nodeGroup = d3.select(this);
         
         if (d.imageUrl) {
-          // Clipped image node
           nodeGroup.append('image')
             .attr('href', d.imageUrl)
             .attr('width', (nodeRadius - 2) * 2)
@@ -761,7 +668,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
             .attr('clip-path', 'url(#miniCircleClip)')
             .attr('preserveAspectRatio', 'xMidYMid slice');
         } else {
-          // Fallback circle with text
           nodeGroup.append('circle')
             .attr('r', nodeRadius)
             .attr('fill', '#1e293b')
@@ -875,7 +781,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       ]
     : [];
 
-  // D3 Full Visualization Graph (for visualize screen)
   useEffect(() => {
     if (!vizSvgRef.current || !isVisible || isLoading || currentScreen !== 'visualize') return;
 
@@ -925,13 +830,12 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       .attr('cx', 0)
       .attr('cy', 0);
 
-    // Add arrow markers for each relationship type
     const relationshipColors = ['#4a7c6f', '#8b5c5c', '#5c7a9e', '#7a6b8a', '#8a7a5c', '#64748b'];
     relationshipColors.forEach((color, i) => {
       defs.append('marker')
         .attr('id', `arrow-${i}`)
         .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 28) // Position arrow at edge of node (nodeRadius + arrow size)
+        .attr('refX', 28)
         .attr('refY', 0)
         .attr('markerWidth', 6)
         .attr('markerHeight', 6)
@@ -941,10 +845,9 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
         .attr('d', 'M0,-5L10,0L0,5');
     });
 
-    // Create a color to marker ID mapping
     const colorToMarkerId = (color: string) => {
       const index = relationshipColors.indexOf(color);
-      return index >= 0 ? `arrow-${index}` : 'arrow-5'; // Default to gray
+      return index >= 0 ? `arrow-${index}` : 'arrow-5';
     };
 
     const link = g.append('g')
@@ -960,11 +863,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
         d3.select(event.target as Element)
           .attr('stroke-opacity', 1);
 
-        // Show relationship tooltip
-        const sourceLabel = typeof d.source === 'object' ? d.source.label : d.source;
-        const targetLabel = typeof d.target === 'object' ? d.target.label : d.target;
         const relationship = d.relationship || 'RELATED';
-        const tooltipText = `${relationship}${d.reasoning ? `\n\n${d.reasoning}` : ''}`;
 
         vizTooltip
           .style('opacity', '1')
@@ -1073,7 +972,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     };
   }, [isVisible, isLoading, currentScreen, graphView]);
 
-  // Close on Escape key
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isVisible) {
@@ -1084,12 +982,10 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isVisible, onClose]);
 
-  // Drag functionality - null means centered, otherwise use position
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
 
-  // Reset position to center when overlay opens
   useEffect(() => {
     if (isVisible) {
       setPosition(null);
@@ -1135,35 +1031,11 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     };
   }, [isDragging]);
 
-  const addNode = async (label: string) => {
-    if (!relationGraph || !currentUrl) {
-      return;
-    }
-
-    const newNode: RelationGraphNode = {
-      id: `node-${Date.now()}`,
-      label,
-      probability: 0.5,
-      weight: 1,
-      decision: 'yes',
-      relation: 'WEAK_SIGNAL',
-      children: [],
-    };
-
-    const nextGraph = addChildNode(relationGraph, relationGraph.id, newNode);
-    setRelationGraph(nextGraph);
-    await saveRelationGraph(currentUrl, nextGraph);
-  };
-
-  // Handle Start Pindex - begin analysis
   const handleStart = async () => {
     setHasStarted(true);
     setIsLoading(true);
-    // The useEffect will pick up hasStarted change and load the graph
-    // After graph loads, we'll auto-accept the root decision and search for dependencies
   };
 
-  // Handle Not Now - close overlay
   const handleNotNow = () => {
     onClose();
   };
@@ -1221,7 +1093,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
 
   if (!isVisible) return null;
 
-  // Render Decision Screen
   const renderDecisionScreen = () => (
     <div style={{
       position: 'relative',
@@ -1233,7 +1104,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
       padding: '12px 16px',
       overflowY: 'auto',
     }}>
-      {/* Risk Slider */}
       <div>
         <div style={{
           fontSize: '9px',
@@ -1279,7 +1149,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
         </div>
       </div>
 
-      {/* Chain Dependency - Mini Graph */}
+      {miniGraphData && (
       <div>
         <div style={{
           fontSize: '9px',
@@ -1401,23 +1271,10 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
                 )}
               </>
             )}
-            {!miniGraphData && (
-              <div style={{
-                marginTop: '8px',
-                paddingTop: '8px',
-                borderTop: '1px solid rgba(51, 65, 85, 0.3)',
-                fontSize: '10px',
-                color: '#64748b',
-              lineHeight: 1.4,
-              textAlign: 'center',
-            }}>
-              No queued dependencies yet
-            </div>
-          )}
         </div>
       </div>
+      )}
 
-      {/* User Selection Display */}
       {userSelection && showUserSelection && (
         <div style={{
           display: 'flex',
@@ -1437,7 +1294,7 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
         </div>
       )}
 
-      {/* Impact Summary */}
+      {(globalsLoading || globalsError || globalsDelta) && (
       <div>
         <div style={{
           fontSize: '9px',
@@ -1529,20 +1386,10 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
               )}
             </>
           )}
-          {!globalsLoading && !globalsError && !globalsDelta && (
-            <p style={{ 
-              margin: 0, 
-              fontSize: '11px', 
-              color: '#64748b', 
-              lineHeight: 1.5,
-            }}>
-              No queued dependency to compare yet.
-            </p>
-          )}
         </motion.div>
       </div>
+      )}
 
-      {/* Action Buttons */}
       {hasDecisionTarget && (
         <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '8px' }}>
           <button
@@ -1618,7 +1465,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     </div>
   );
 
-  // Render Visualization Screen
   const renderVisualizationScreen = () => (
     <div style={{
       position: 'relative',
@@ -1661,106 +1507,9 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
     </div>
   );
 
-  // Render Add Nodes Screen - state is now at top level
-  const renderAddScreen = () => (
-    <div style={{
-      position: 'relative',
-      zIndex: 3,
-      flex: 1,
-      padding: '12px 16px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '12px',
-    }}>
-      <div>
-        <div style={{
-          fontSize: '9px',
-          color: '#64748b',
-          textTransform: 'uppercase',
-          letterSpacing: '0.5px',
-          marginBottom: '6px',
-          fontWeight: 600,
-        }}>Add Related Market</div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <input
-            type="text"
-            value={newNodeLabel}
-            onChange={(e) => setNewNodeLabel(e.target.value)}
-            placeholder="Enter market name..."
-            style={{
-              flex: 1,
-              padding: '10px 14px',
-              borderRadius: '8px',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              background: 'rgba(30, 41, 59, 0.5)',
-              color: '#e2e8f0',
-              fontSize: '12px',
-              outline: 'none',
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && newNodeLabel.trim()) {
-                addNode(newNodeLabel.trim());
-                setNewNodeLabel('');
-              }
-            }}
-          />
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (newNodeLabel.trim()) {
-                addNode(newNodeLabel.trim());
-                setNewNodeLabel('');
-              }
-            }}
-            onMouseEnter={() => setAddBtnHover(true)}
-            onMouseLeave={() => setAddBtnHover(false)}
-            style={{
-              ...buttonBase,
-              padding: '8px 12px',
-              border: addBtnHover ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
-              boxShadow: addBtnHover ? '0 8px 32px rgba(70, 100, 140, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.15)',
-              filter: addBtnHover ? 'brightness(1.25)' : 'brightness(1)',
-            }}
-          >
-            Add
-          </button>
-        </div>
-      </div>
-      
-      <div>
-        <div style={{
-          fontSize: '9px',
-          color: '#64748b',
-          textTransform: 'uppercase',
-          letterSpacing: '0.5px',
-          marginBottom: '8px',
-          fontWeight: 600,
-        }}>Current Nodes ({graphView.nodes.length})</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '300px', overflowY: 'auto' }}>
-          {graphView.nodes.map((node) => (
-            <div
-              key={node.id}
-              style={{
-                padding: '8px 12px',
-                background: 'rgba(30, 41, 59, 0.3)',
-                borderRadius: '6px',
-                fontSize: '11px',
-                color: '#e2e8f0',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
-              }}
-            >
-              {node.label}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-
   return (
     <AnimatePresence mode="wait">
       {isVisible && (
-        /* Main Panel */
         <motion.div
           key="main-panel"
           initial={{ opacity: 0 }}
@@ -1783,7 +1532,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
           }}
           onClick={onClose}
         >
-          {/* Panel */}
           <motion.div
             ref={overlayRef}
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -1811,7 +1559,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
             }}
             onMouseDown={handleMouseDown}
           >
-            {/* Texture overlay */}
             <div style={{
               position: 'absolute',
               inset: 0,
@@ -1824,7 +1571,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
               zIndex: 1,
             }} />
             
-            {/* Glossy sheen */}
             <div style={{
               position: 'absolute',
               top: 0,
@@ -1837,7 +1583,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
               borderRadius: '20px 20px 0 0',
             }} />
 
-            {/* Header */}
             <div 
               data-draggable="true"
               style={{
@@ -1936,7 +1681,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
               </div>
             </div>
 
-            {/* Navigation (for non-decision/intro screens) */}
             {currentScreen !== 'decision' && currentScreen !== 'intro' && (
               <div style={{
                 position: 'relative',
@@ -1966,28 +1710,25 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setCurrentScreen('add');
+                    setCurrentScreen('fund');
                   }}
-                  onMouseEnter={() => setAddHover(true)}
-                  onMouseLeave={() => setAddHover(false)}
+                  onMouseEnter={() => setFundHover(true)}
+                  onMouseLeave={() => setFundHover(false)}
                   style={{
                     ...buttonBase,
                     padding: '6px 12px',
                     fontSize: '11px',
-                    background: currentScreen === 'add' ? 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)' : addHover ? 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)' : 'linear-gradient(180deg, #3d4f63 0%, #2a3a4a 100%)',
-                    color: '#e2e8f0',
-                    border: currentScreen === 'add' || addHover ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
-                    boxShadow: addHover ? '0 8px 32px rgba(70, 100, 140, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.15)',
-                    filter: addHover && currentScreen !== 'add' ? 'brightness(1.25)' : 'brightness(1)',
+                    border: fundHover ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+                    boxShadow: fundHover ? '0 8px 32px rgba(70, 100, 140, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.15)',
+                    filter: fundHover ? 'brightness(1.25)' : 'brightness(1)',
                   }}
                 >
-                  Add
+                  View Fund
                 </button>
               </div>
             )}
 
-            {/* Content */}
-            {showLoader ? (
+            {isLoading && hasStarted ? (
               <div style={{
                 position: 'relative',
                 zIndex: 3,
@@ -1996,15 +1737,24 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '12px',
+                gap: '16px',
               }}>
                 <VideoLoader size={160} />
                 <span style={{ fontSize: '13px', color: '#94a3b8', letterSpacing: '0.4px' }}>
-                  {isLoading ? 'searching dependencies...' : 'calculating...'}
+                  {isLoading ? 'Searching for related markets...' : 'calculating...'}
                 </span>
+                <button
+                  onClick={() => setCurrentScreen('visualize')}
+                  style={{
+                    ...buttonBase,
+                    padding: '8px 16px',
+                    fontSize: '12px',
+                  }}
+                >
+                  View Nodes
+                </button>
               </div>
             ) : currentScreen === 'intro' ? (
-              /* Intro Screen */
               <div style={{
                 position: 'relative',
                 zIndex: 3,
@@ -2016,7 +1766,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
                 padding: '32px 24px',
                 gap: '24px',
               }}>
-                {/* Market image */}
                 <div style={{
                   width: '80px',
                   height: '80px',
@@ -2048,7 +1797,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
                   )}
                 </div>
 
-                {/* Event title */}
                 <div style={{ textAlign: 'center' }}>
                   <h2 style={{
                     fontSize: '16px',
@@ -2068,7 +1816,6 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
                   </p>
                 </div>
 
-                {/* Buttons */}
                 <div style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -2122,11 +1869,19 @@ export function OverlayApp({ isVisible, onClose, profileImage: initialProfileIma
               <>
                 {currentScreen === 'decision' && renderDecisionScreen()}
                 {currentScreen === 'visualize' && renderVisualizationScreen()}
-                {currentScreen === 'add' && renderAddScreen()}
+                {currentScreen === 'fund' && (
+                  <div style={{ position: 'relative', zIndex: 3, flex: 1, padding: '12px 16px', overflowY: 'auto' }}>
+                    <FundScreen
+                      relationGraph={relationGraph ?? createRootGraph({ url: currentUrl ?? 'root' })}
+                      globalsResult={globalsBaseline}
+                      globalsLoading={globalsLoading}
+                      globalsError={globalsError}
+                    />
+                  </div>
+                )}
               </>
             )}
 
-            {/* Footer */}
             <div style={{
               position: 'relative',
               zIndex: 3,

@@ -3,7 +3,7 @@ import { OverlayApp } from './overlay/OverlayApp';
 
 export default defineContentScript({
   matches: ['*://*.polymarket.com/*'],
-  cssInjectionMode: 'ui',
+  cssInjectionMode: 'manual',
   
   async main(ctx) {
     // Track visibility, root, and profile image
