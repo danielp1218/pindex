@@ -13,7 +13,7 @@ function App() {
 
       {/* Blur overlay with thin diagonal cutout - less blur */}
       <div
-        className="absolute inset-0 pointer-events-none z-[41]"
+        className="absolute inset-0 pointer-events-none z-41"
         style={{
           backdropFilter: 'blur(1px)',
           WebkitBackdropFilter: 'blur(1px)',
@@ -40,7 +40,7 @@ function App() {
 
       {/* Darkening overlay - more blue tint */}
       <div
-        className="absolute inset-0 pointer-events-none z-[40]"
+        className="absolute inset-0 pointer-events-none z-40"
         style={{
           background: `linear-gradient(
             45deg,
@@ -57,7 +57,7 @@ function App() {
 
       {/* Bottom-left blur for hero text area */}
       <div
-        className="absolute inset-0 pointer-events-none z-[39]"
+        className="absolute inset-0 pointer-events-none z-39"
         style={{
           backdropFilter: 'blur(3px)',
           WebkitBackdropFilter: 'blur(3px)',
@@ -68,7 +68,7 @@ function App() {
 
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-transparent border-b border-white/5 animate-fade-in" style={{ animationDelay: '0.2s' }}>
-        <div className="max-w-[1400px] mx-auto h-full px-4 md:px-8 flex items-center justify-between">
+        <div className="max-w-350 mx-auto h-full px-4 md:px-8 flex items-center justify-between">
           <span className="text-white font-serif text-xl md:text-2xl font-extrabold italic tracking-tight drop-shadow-[0_2px_8px_rgba(0,0,0,0.4)]">Pindex</span>
           
         </div>
@@ -76,7 +76,7 @@ function App() {
 
       {/* Main Content */}
       <main className="pt-14 h-screen relative overflow-hidden">
-        <div className="max-w-[1400px] mx-auto px-4 md:px-8 py-4 h-[calc(100vh-56px)] flex flex-col overflow-hidden">
+        <div className="max-w-350 mx-auto px-4 md:px-8 py-4 h-[calc(100vh-56px)] flex flex-col overflow-hidden">
           {/* Dashboard Layout */}
           <div className="flex flex-col md:flex-row gap-4 md:gap-6 flex-1 min-h-0 overflow-hidden">
             {/* Left Sidebar */}
@@ -88,10 +88,10 @@ function App() {
             <div className="flex flex-col gap-3 flex-1 min-h-0 overflow-hidden">
               {/* Top Row: Balance + Bets */}
               <div className="flex flex-col md:flex-row gap-4 items-stretch flex-1 min-h-0">
-                <div className="flex-[3] min-w-0 animate-fade-in" style={{ animationDelay: '0.6s' }}>
+                <div className="flex-3 min-w-0 animate-fade-in" style={{ animationDelay: '0.6s' }}>
                   <BalanceCard />
                 </div>
-                <div className="flex-[2] min-w-0 animate-fade-in" style={{ animationDelay: '0.7s' }}>
+                <div className="flex-2 min-w-0 animate-fade-in" style={{ animationDelay: '0.7s' }}>
                   <BetsList />
                 </div>
               </div>
@@ -100,7 +100,7 @@ function App() {
               <div className="relative flex-1 min-h-0 overflow-hidden animate-fade-in" style={{ animationDelay: '0.8s' }}>
                 <IndexTable />
                 {/* Fade overlay */}
-                <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-[#111d2e] via-[#111d2e]/80 to-transparent pointer-events-none" />
+                <div className="absolute bottom-0 left-0 right-0 h-48 bg-linear-to-t from-[#111d2e] via-[#111d2e]/80 to-transparent pointer-events-none" />
               </div>
             </div>
           </div>
@@ -116,8 +116,8 @@ function App() {
           />
 
           {/* Hero Text Overlay - above lighting effects */}
-          <div className="absolute bottom-16 md:bottom-24 left-4 md:left-8 right-4 md:right-8 pointer-events-none z-[200] animate-fade-in" style={{ animationDelay: '1s' }}>
-            <div className="max-w-[1400px] mx-auto pl-0 md:pl-32 mb-4 md:mb-6 text-center md:text-left">
+          <div className="absolute bottom-16 md:bottom-24 left-4 md:left-8 right-4 md:right-8 pointer-events-none z-200 animate-fade-in" style={{ animationDelay: '1s' }}>
+            <div className="max-w-350 mx-auto pl-0 md:pl-32 mb-4 md:mb-6 text-center md:text-left">
               <h1 className="text-3xl md:text-5xl lg:text-7xl text-white font-serif font-bold leading-tight tracking-tight drop-shadow-[0_2px_12px_rgba(0,0,0,0.4)] whitespace-nowrap md:whitespace-normal">
                 Bet <span className="italic">smarter </span>
                 <span className="md:block">with Pindex.</span>
