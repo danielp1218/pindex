@@ -6,7 +6,10 @@ Agentic dependency analysis that reveals correlations between prediction markets
 
 
 
-https://github.com/user-attachments/assets/cfcc4938-d646-4809-9529-13b5e33e0a11
+
+https://github.com/user-attachments/assets/35d1bd17-1c47-4ba0-b262-c9d3992490c9
+
+
 
 
 
