@@ -198,7 +198,7 @@ const MarketCard = ({
 
 export function FeaturesSection() {
   return (
-    <section className="min-h-screen py-12 md:py-32 relative overflow-hidden bg-[#0d1926]">
+    <section className="py-12 md:py-32 pb-16 md:pb-20 relative overflow-hidden bg-[#0d1926]">
       {/* Ambient Background Effects */}
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute top-[10%] left-[5%] w-[400px] h-[400px] bg-[#6fd1b0]/10 rounded-full blur-[120px]" />
@@ -835,57 +835,10 @@ export function FeaturesSection() {
           </motion.div>
         </div>
 
-        {/* Bottom CTA for Section */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          transition={{ duration: 1, delay: 0.5 }}
-          className="mt-12 md:mt-24 text-center"
-        >
-          <a
-            href="/waitlist"
-            className="group relative inline-flex items-center gap-2 md:gap-3 px-6 md:px-8 py-3 md:py-4 rounded-full border border-white/10 text-white/60 text-xs md:text-sm tracking-widest uppercase font-semibold hover:text-white hover:border-white/30 transition-all duration-300 overflow-hidden"
-            style={{
-              background:
-                "linear-gradient(90deg, rgba(69, 90, 112, 0.1) 0%, rgba(47, 61, 77, 0.1) 50%, rgba(69, 90, 112, 0.1) 100%)",
-            }}
-          >
-            {/* Hover glow effect */}
-            <div className="absolute inset-0 bg-gradient-to-r from-[#6fd1b0]/20 via-[#ba96e3]/20 to-[#6fd1b0]/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500 blur-xl" />
-
-            {/* Shimmer effect on hover */}
-            <motion.div
-              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent"
-              initial={{ x: "-100%" }}
-              whileHover={{ x: "100%" }}
-              transition={{ duration: 0.8, ease: "easeInOut" }}
-            />
-
-            <span className="relative z-10">Join the waitlist</span>
-
-            {/* Arrow icon */}
-            <motion.svg
-              className="w-4 h-4 relative z-10"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              initial={{ x: 0 }}
-              whileHover={{ x: 4 }}
-              transition={{ duration: 0.3 }}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M13 7l5 5m0 0l-5 5m5-5H6"
-              />
-            </motion.svg>
-          </a>
-        </motion.div>
       </div>
 
       {/* Footer */}
-      <footer className="absolute bottom-0 left-0 right-0 py-4 md:py-8 text-center">
+      <footer className="mt-8 md:mt-12 py-4 md:py-8 text-center">
         <p className="text-white/30 text-[10px] md:text-xs tracking-wide">
           © {new Date().getFullYear()} Pindex. All rights reserved.
         </p>
